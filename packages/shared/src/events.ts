@@ -45,7 +45,7 @@ export interface ServerToClientEvents {
   player_left: (payload: { uuid: string; nickname: string; playerCount: number }) => void;
 
   /** Sent to each player when game begins — contains their unique card */
-  game_starting: (payload: { card: BingoCard; pattern: WinPattern; intervalSeconds: number }) => void;
+  game_starting: (payload: { card?: BingoCard; pattern: WinPattern; intervalSeconds: number }) => void;
 
   /** Broadcast to ALL clients (players + display) when a number is drawn */
   number_called: (payload: {
