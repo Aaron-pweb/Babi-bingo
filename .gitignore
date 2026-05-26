@@ -1,2 +1,4 @@
 node_modules
 bingo_app_development_plan.md
+apps/backend/.env
+apps/backend/.env.example
