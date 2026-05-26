@@ -1,30 +1,35 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { connectSocket } from '../socket/client';
 
+// H8: Separate auth modes — no more silent register fallback on login fail
+type Tab = 'player' | 'login' | 'register';
+
 export default function Home() {
   const nav = useNavigate();
-  const [tab, setTab] = useState<'player' | 'operator'>('player');
+  const [params] = useSearchParams();
+  const authError = params.get('error');
+
+  const [tab, setTab] = useState<Tab>('player');
+  const [error, setError] = useState(authError === 'auth_required' ? 'Session expired. Please log in again.' : '');
+  const [loading, setLoading] = useState(false);
 
   // Player state
   const [roomCode, setRoomCode] = useState('');
   const [nickname, setNickname] = useState('');
-  const [joining, setJoining] = useState(false);
-  const [error, setError] = useState('');
 
   // Operator state
   const [opUser, setOpUser] = useState('');
   const [opPass, setOpPass] = useState('');
   const [opHouse, setOpHouse] = useState('');
-  const [opLogging, setOpLogging] = useState(false);
 
   async function joinAsPlayer() {
     setError('');
     if (!roomCode.trim() || !nickname.trim()) { setError('Enter room code and nickname'); return; }
-    setJoining(true);
+    setLoading(true);
     try {
-      await api.getRoom(roomCode.toUpperCase()); // verify exists
+      await api.getRoom(roomCode.toUpperCase());
       const { uuid, token } = await api.guestToken(nickname.trim());
       localStorage.setItem('player_uuid', uuid);
       localStorage.setItem('player_token', token);
@@ -32,31 +37,50 @@ export default function Home() {
       const socket = connectSocket({ token });
       socket.emit('join_room', { roomCode: roomCode.toUpperCase(), token });
       socket.once('room_joined', () => nav(`/room/${roomCode.toUpperCase()}`));
-      socket.once('game_error', (e) => { setError(e.message); setJoining(false); });
+      socket.once('game_error', (e) => { setError(e.message); setLoading(false); });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to join room');
-      setJoining(false);
+      setLoading(false);
     }
   }
 
+  // H8: Login only — does NOT fall back to register
   async function operatorLogin() {
     setError('');
-    setOpLogging(true);
+    setLoading(true);
     try {
-      let data: { accessToken: string; houseName?: string };
-      try {
-        data = await api.login(opUser, opPass);
-      } catch {
-        data = await api.register(opUser, opPass, opHouse || opUser + "'s House");
-      }
+      const data = await api.login(opUser, opPass);
+      const room = await api.createRoom(data.accessToken);
+      localStorage.setItem('op_token', data.accessToken);
+      localStorage.setItem('op_refresh', data.refreshToken ?? '');
+      nav(`/operator/${room.code}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Login failed');
+      setLoading(false);
+    }
+  }
+
+  // H8: Register only — explicit separate flow
+  async function operatorRegister() {
+    setError('');
+    if (!opHouse.trim()) { setError('House name is required to register'); return; }
+    setLoading(true);
+    try {
+      const data = await api.register(opUser, opPass, opHouse.trim());
       const room = await api.createRoom(data.accessToken);
       localStorage.setItem('op_token', data.accessToken);
       nav(`/operator/${room.code}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Login failed');
-      setOpLogging(false);
+      setError(e instanceof Error ? e.message : 'Registration failed');
+      setLoading(false);
     }
   }
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'player', label: '🎮 Join Game' },
+    { id: 'login', label: '🎛 Operator' },
+    { id: 'register', label: '✨ Register' },
+  ];
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-bg">
@@ -69,16 +93,16 @@ export default function Home() {
 
       {/* Tab switcher */}
       <div className="flex bg-surface border border-border rounded-xl p-1 mb-6 w-full max-w-sm">
-        {(['player', 'operator'] as const).map((t) => (
-          <button key={t} onClick={() => { setTab(t); setError(''); }}
-            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === t ? 'bg-gold text-bg' : 'text-dim hover:text-white'}`}>
-            {t === 'player' ? '🎮 Join Game' : '🎛 Operator'}
+        {tabs.map((t) => (
+          <button key={t.id} onClick={() => { setTab(t.id); setError(''); }}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${tab === t.id ? 'bg-gold text-bg' : 'text-dim hover:text-white'}`}>
+            {t.label}
           </button>
         ))}
       </div>
 
       <div className="card w-full max-w-sm space-y-4">
-        {tab === 'player' ? (
+        {tab === 'player' && (
           <>
             <input className="input" placeholder="Room Code (e.g. BINGO-7F3K)"
               value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())}
@@ -86,17 +110,31 @@ export default function Home() {
             <input className="input" placeholder="Your Nickname"
               value={nickname} onChange={e => setNickname(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && joinAsPlayer()} />
-            <button className="btn-primary w-full" onClick={joinAsPlayer} disabled={joining}>
-              {joining ? 'Joining…' : 'Join Game'}
+            <button className="btn-primary w-full" onClick={joinAsPlayer} disabled={loading}>
+              {loading ? 'Joining…' : 'Join Game'}
             </button>
           </>
-        ) : (
+        )}
+
+        {tab === 'login' && (
           <>
             <input className="input" placeholder="Username" value={opUser} onChange={e => setOpUser(e.target.value)} />
-            <input className="input" placeholder="Password" type="password" value={opPass} onChange={e => setOpPass(e.target.value)} />
-            <input className="input" placeholder="House name (new accounts)" value={opHouse} onChange={e => setOpHouse(e.target.value)} />
-            <button className="btn-primary w-full" onClick={operatorLogin} disabled={opLogging}>
-              {opLogging ? 'Connecting…' : 'Login & Open Room'}
+            <input className="input" placeholder="Password" type="password" value={opPass} onChange={e => setOpPass(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && operatorLogin()} />
+            <button className="btn-primary w-full" onClick={operatorLogin} disabled={loading}>
+              {loading ? 'Connecting…' : 'Login & Open Room'}
+            </button>
+          </>
+        )}
+
+        {tab === 'register' && (
+          <>
+            <input className="input" placeholder="Username (min 3 chars)" value={opUser} onChange={e => setOpUser(e.target.value)} />
+            <input className="input" placeholder="Password (min 6 chars)" type="password" value={opPass} onChange={e => setOpPass(e.target.value)} />
+            <input className="input" placeholder="House Name" value={opHouse} onChange={e => setOpHouse(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && operatorRegister()} />
+            <button className="btn-primary w-full" onClick={operatorRegister} disabled={loading}>
+              {loading ? 'Creating account…' : 'Register & Open Room'}
             </button>
           </>
         )}

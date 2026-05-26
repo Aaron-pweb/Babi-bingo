@@ -1,79 +1,48 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { signGuestToken, signAccessToken, signRefreshToken } from '../auth/tokens';
+import { hash, compare } from 'bcryptjs';
+import { signGuestToken, signAccessToken, signRefreshToken, verifyToken } from '../auth/tokens';
+import { validate, GuestSchema, RegisterSchema, LoginSchema, RefreshSchema } from '../middleware/validate';
 
 const router = Router();
 
 // ─── In-memory operator store (replaced by DB in Phase 4) ───────
-// Shape: { uuid, username, passwordHash, houseId, houseName, role }
-// For Phase 2 we store plain text — DO NOT use in production.
 interface OperatorRecord {
   uuid: string;
   username: string;
-  password: string; // plaintext, Phase 4 will hash with bcrypt
+  passwordHash: string; // C2: always bcrypt-hashed
   role: 'OPERATOR' | 'OWNER';
   houseId: string;
   houseName: string;
 }
 
-const operators = new Map<string, OperatorRecord>(); // keyed by username
+const operators = new Map<string, OperatorRecord>();
 
-// ─────────────────────────────────────────────
-//  POST /api/auth/guest
-//  Body: { nickname: string }
-//  Returns: { token: string }
-// ─────────────────────────────────────────────
-router.post('/guest', async (req: Request, res: Response): Promise<void> => {
-  const { nickname } = req.body as { nickname?: string };
-
-  if (!nickname || nickname.trim().length < 2 || nickname.trim().length > 24) {
-    res.status(400).json({ error: 'Nickname must be 2–24 characters' });
-    return;
-  }
-
+// POST /api/auth/guest
+router.post('/guest', validate(GuestSchema), async (req: Request, res: Response): Promise<void> => {
+  const { nickname } = req.body as { nickname: string };
   const uuid = uuidv4();
   const token = await signGuestToken(uuid, nickname.trim());
-
   res.json({ uuid, token });
 });
 
-// ─────────────────────────────────────────────
-//  POST /api/auth/register
-//  Body: { username, password, houseName, role }
-//  Returns: { accessToken, refreshToken }
-// ─────────────────────────────────────────────
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
+// POST /api/auth/register
+router.post('/register', validate(RegisterSchema), async (req: Request, res: Response): Promise<void> => {
   const { username, password, houseName, role } = req.body as {
-    username?: string;
-    password?: string;
-    houseName?: string;
-    role?: string;
+    username: string; password: string; houseName: string; role?: 'OPERATOR' | 'OWNER';
   };
-
-  if (!username || !password || !houseName) {
-    res.status(400).json({ error: 'username, password, and houseName are required' });
-    return;
-  }
 
   if (operators.has(username)) {
     res.status(409).json({ error: 'Username already exists' });
     return;
   }
 
-  const resolvedRole: 'OPERATOR' | 'OWNER' =
-    role === 'OPERATOR' ? 'OPERATOR' : 'OWNER';
-
+  const resolvedRole: 'OPERATOR' | 'OWNER' = role === 'OPERATOR' ? 'OPERATOR' : 'OWNER';
   const uuid = uuidv4();
   const houseId = uuidv4();
+  const passwordHash = await hash(password, 12);
 
-  operators.set(username, {
-    uuid,
-    username,
-    password,
-    role: resolvedRole,
-    houseId,
-    houseName,
-  });
+  operators.set(username, { uuid, username, passwordHash, role: resolvedRole, houseId, houseName });
 
   const accessToken = await signAccessToken(uuid, resolvedRole, houseId, username);
   const refreshToken = await signRefreshToken(uuid);
@@ -81,17 +50,13 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
   res.status(201).json({ uuid, houseId, accessToken, refreshToken });
 });
 
-// ─────────────────────────────────────────────
-//  POST /api/auth/login
-//  Body: { username, password }
-//  Returns: { accessToken, refreshToken }
-// ─────────────────────────────────────────────
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const { username, password } = req.body as { username?: string; password?: string };
+// POST /api/auth/login
+router.post('/login', validate(LoginSchema), async (req: Request, res: Response): Promise<void> => {
+  const { username, password } = req.body as { username: string; password: string };
 
-  const op = username ? operators.get(username) : undefined;
+  const op = operators.get(username);
 
-  if (!op || op.password !== password) {
+  if (!op || !(await compare(password, op.passwordHash))) {
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
@@ -100,6 +65,30 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   const refreshToken = await signRefreshToken(op.uuid);
 
   res.json({ uuid: op.uuid, houseId: op.houseId, houseName: op.houseName, accessToken, refreshToken });
+});
+
+// POST /api/auth/refresh  — C5
+router.post('/refresh', validate(RefreshSchema), async (req: Request, res: Response): Promise<void> => {
+  const { refreshToken } = req.body as { refreshToken: string };
+
+  try {
+    const payload = await verifyToken(refreshToken) as { uuid?: string; type?: string };
+    if (payload.type !== 'refresh' || !payload.uuid) {
+      res.status(401).json({ error: 'Invalid refresh token' });
+      return;
+    }
+
+    const op = [...operators.values()].find((o) => o.uuid === payload.uuid);
+    if (!op) {
+      res.status(401).json({ error: 'User not found' });
+      return;
+    }
+
+    const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username);
+    res.json({ accessToken });
+  } catch {
+    res.status(401).json({ error: 'Refresh token invalid or expired' });
+  }
 });
 
 export default router;

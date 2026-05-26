@@ -1,13 +1,21 @@
-import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import type { BingoCard as BingoCardType } from '@babi-bingo/shared';
 import { connectSocket, getSocket } from '../socket/client';
 import BingoCard from '../components/BingoCard';
 
+// M6: Defined outside component — not recreated on every render
 const COL_COLOR: Record<string, string> = { B: 'text-B', I: 'text-I', N: 'text-N', G: 'text-G', O: 'text-O' };
+const STATUS_COLOR: Record<string, string> = {
+  WAITING: 'bg-muted text-white',
+  PLAYING: 'bg-G/20 text-G',
+  PAUSED: 'bg-N/20 text-N',
+  FINISHED: 'bg-gold/20 text-gold',
+};
 
 export default function PlayerRoom() {
   const { code } = useParams<{ code: string }>();
+  const nav = useNavigate();
   const [card, setCard] = useState<BingoCardType | null>(null);
   const [called, setCalled] = useState<number[]>([]);
   const [lastNum, setLastNum] = useState<{ number: number; column: string } | null>(null);
@@ -21,40 +29,69 @@ export default function PlayerRoom() {
     const token = localStorage.getItem('player_token') ?? '';
     const socket = connectSocket({ token });
 
-    socket.on('game_starting', ({ card: c }) => { if (c) setCard(c); setStatus('PLAYING'); });
-    socket.on('number_called', ({ number, column, calledNumbers }) => {
+    // M7: Named listener references for precise cleanup
+    const onGameStarting = ({ card: c }: { card?: BingoCardType }) => {
+      if (c) setCard(c);
+      setStatus('PLAYING');
+    };
+    const onNumberCalled = ({ number, column, calledNumbers }: { number: number; column: string; calledNumbers: number[] }) => {
       setCalled(calledNumbers);
       setLastNum({ number, column });
-    });
-    socket.on('game_paused', () => setStatus('PAUSED'));
-    socket.on('game_resumed', () => setStatus('PLAYING'));
-    socket.on('game_won', ({ winner: w }) => { setWinner(w.nickname); setStatus('FINISHED'); });
-    socket.on('false_alarm', ({ cooldownSeconds }) => {
+    };
+    const onGamePaused = () => setStatus('PAUSED');
+    const onGameResumed = () => setStatus('PLAYING');
+    const onGameWon = ({ winner: w }: { winner: { nickname: string } }) => {
+      setWinner(w.nickname);
+      setStatus('FINISHED');
+    };
+    const onFalseAlarm = ({ cooldownSeconds }: { cooldownSeconds: number }) => {
       setFalseAlarm(true);
       setCooldown(true);
       setTimeout(() => { setFalseAlarm(false); setCooldown(false); }, cooldownSeconds * 1000);
-    });
-    socket.on('sync_state', ({ room, card: c }) => {
+    };
+    const onSyncState = ({ room, card: c }: { room: { state: string; calledNumbers: number[] }; card?: BingoCardType }) => {
       setStatus(room.state);
       setCalled(room.calledNumbers);
       if (c) setCard(c);
-    });
+    };
+    // H9: Redirect on auth failure
+    const onConnectError = (err: Error) => {
+      if (err.message.includes('AUTH')) {
+        localStorage.removeItem('player_token');
+        localStorage.removeItem('player_uuid');
+        localStorage.removeItem('player_nickname');
+        nav('/?error=auth_required');
+      }
+    };
+
+    socket.on('game_starting', onGameStarting);
+    socket.on('number_called', onNumberCalled);
+    socket.on('game_paused', onGamePaused);
+    socket.on('game_resumed', onGameResumed);
+    socket.on('game_won', onGameWon);
+    socket.on('false_alarm', onFalseAlarm);
+    socket.on('sync_state', onSyncState);
+    socket.on('connect_error', onConnectError);
 
     socket.emit('request_sync', { roomCode: code! });
 
     return () => {
-      socket.off('game_starting'); socket.off('number_called');
-      socket.off('game_paused'); socket.off('game_resumed');
-      socket.off('game_won'); socket.off('false_alarm'); socket.off('sync_state');
+      // M7: Remove only our specific handlers
+      socket.off('game_starting', onGameStarting);
+      socket.off('number_called', onNumberCalled);
+      socket.off('game_paused', onGamePaused);
+      socket.off('game_resumed', onGameResumed);
+      socket.off('game_won', onGameWon);
+      socket.off('false_alarm', onFalseAlarm);
+      socket.off('sync_state', onSyncState);
+      socket.off('connect_error', onConnectError);
     };
-  }, [code]);
+  }, [code, nav]);
 
-  function claimBingo() {
+  const claimBingo = useCallback(() => {
     if (cooldown) return;
     getSocket().emit('claim_bingo', { roomCode: code! });
-  }
-
-  const statusColor: Record<string, string> = { WAITING: 'bg-muted text-white', PLAYING: 'bg-G/20 text-G', PAUSED: 'bg-N/20 text-N', FINISHED: 'bg-gold/20 text-gold' };
+  }, [cooldown, code]);
 
   return (
     <div className="min-h-screen bg-bg flex flex-col max-w-lg mx-auto px-4 py-6 gap-4">
@@ -64,7 +101,7 @@ export default function PlayerRoom() {
           <h1 className="font-black text-xl text-white">🎱 {code}</h1>
           <p className="text-dim text-sm">{nickname}</p>
         </div>
-        <span className={`badge ${statusColor[status] ?? 'bg-surface text-dim'}`}>
+        <span className={`badge ${STATUS_COLOR[status] ?? 'bg-surface text-dim'}`}>
           {status === 'PLAYING' && <span className="w-2 h-2 rounded-full bg-G animate-pulse" />}
           {status}
         </span>
@@ -80,7 +117,7 @@ export default function PlayerRoom() {
         </div>
       )}
 
-      {/* Waiting state */}
+      {/* Waiting */}
       {status === 'WAITING' && !card && (
         <div className="card text-center py-10 text-dim">
           <p className="text-4xl mb-3">⏳</p>

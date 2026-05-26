@@ -1,20 +1,18 @@
 import { Server, Socket } from 'socket.io';
 import { ClientToServerEvents, ServerToClientEvents, Player } from '@babi-bingo/shared';
 import {
-  getRoom,
-  getPlayers,
-  addPlayer,
-  removePlayer,
-  getCard,
+  getRoom, getPlayers, addPlayer, removePlayer, getCard, updateRoom,
+  toRoomInfo,
 } from '../rooms/roomManager';
 import { requireRole } from '../middleware/socketAuth';
+import type { WinPattern } from '@babi-bingo/shared';
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void {
 
-  // ── join_room ─────────────────────────────────────────────────
+  // ── join_room ──────────────────────────────────────────────────
   socket.on('join_room', async ({ roomCode }) => {
     if (!requireRole(socket, 'PLAYER', 'OPERATOR', 'OWNER')) return;
 
@@ -32,32 +30,12 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
     };
 
     const players = await addPlayer(roomCode, player);
-
-    // Join the Socket.io room
     await socket.join(roomCode);
 
-    // Send room state + player list to this client
-    socket.emit('room_joined', {
-      room: {
-        code: room.code,
-        houseName: room.houseName,
-        state: room.state,
-        pattern: room.pattern,
-        calledNumbers: room.calledNumbers,
-        playerCount: players.length,
-        intervalSeconds: room.intervalSeconds,
-      },
-      players,
-    });
+    socket.emit('room_joined', { room: toRoomInfo(room, players.length), players });
+    socket.to(roomCode).emit('player_joined', { player, playerCount: players.length });
 
-    // Notify others
-    socket.to(roomCode).emit('player_joined', {
-      player,
-      playerCount: players.length,
-    });
-
-    // Store mapping for disconnect
-    socket.data.currentRoom = roomCode;
+    socket.data.currentRoom = roomCode; // M2: properly typed
   });
 
   // ── join_display ──────────────────────────────────────────────
@@ -71,23 +49,10 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
     }
 
     await socket.join(roomCode);
-
     const players = await getPlayers(roomCode);
 
-    // Send current state to display so it can render what's been called so far
-    socket.emit('room_joined', {
-      room: {
-        code: room.code,
-        houseName: room.houseName,
-        state: room.state,
-        pattern: room.pattern,
-        calledNumbers: room.calledNumbers,
-        playerCount: players.length,
-        intervalSeconds: room.intervalSeconds,
-      },
-      players,
-    });
-
+    // M1: Use shared toRoomInfo helper — no more copy-paste inline object
+    socket.emit('room_joined', { room: toRoomInfo(room, players.length), players });
     socket.data.currentRoom = roomCode;
     console.log(`[Socket] Display connected to room ${roomCode}`);
   });
@@ -99,34 +64,33 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
 
     const players = await getPlayers(roomCode);
     let card = undefined;
-
     if (socket.data.role === 'PLAYER') {
       const stored = await getCard(roomCode, socket.data.uuid);
       card = stored ?? undefined;
     }
 
-    socket.emit('sync_state', {
-      room: {
-        code: room.code,
-        houseName: room.houseName,
-        state: room.state,
-        pattern: room.pattern,
-        calledNumbers: room.calledNumbers,
-        playerCount: players.length,
-        intervalSeconds: room.intervalSeconds,
-      },
-      players,
-      card,
-    });
+    socket.emit('sync_state', { room: toRoomInfo(room, players.length), players, card });
+  });
+
+  // ── set_pattern — H4 ─────────────────────────────────────────
+  socket.on('set_pattern', async ({ roomCode, pattern }) => {
+    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    const room = await getRoom(roomCode);
+    if (!room) { socket.emit('game_error', { code: 'ROOM_NOT_FOUND', message: `Room ${roomCode} not found` }); return; }
+    if (room.operatorUuid !== socket.data.uuid) { socket.emit('game_error', { code: 'FORBIDDEN', message: 'Only the room operator can set the pattern' }); return; }
+    if (room.state !== 'WAITING') { socket.emit('game_error', { code: 'INVALID_STATE', message: 'Pattern can only be changed before the game starts' }); return; }
+
+    await updateRoom(roomCode, { pattern: pattern as WinPattern });
+    // Confirm change back to the operator
+    socket.emit('game_error', { code: 'PATTERN_SET', message: `Pattern set to ${pattern}` });
   });
 
   // ── disconnect ────────────────────────────────────────────────
   socket.on('disconnect', async () => {
-    const roomCode = (socket.data as Record<string, string>).currentRoom;
+    const roomCode = socket.data.currentRoom; // M2: no more unsafe cast
     if (!roomCode || socket.data.role === 'DISPLAY') return;
 
     const players = await removePlayer(roomCode, socket.data.uuid);
-
     io.to(roomCode).emit('player_left', {
       uuid: socket.data.uuid,
       nickname: socket.data.nickname,

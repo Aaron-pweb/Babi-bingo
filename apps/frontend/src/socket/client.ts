@@ -17,9 +17,19 @@ export function getSocket(): GameSocket {
   return socket;
 }
 
+/**
+ * H3: Disconnect + recreate socket when auth changes.
+ * The previous socket may be connected with a different token/role —
+ * we must disconnect it first so the new handshake carries the correct auth.
+ */
 export function connectSocket(auth: { token?: string; role?: string }): GameSocket {
+  // If already connected with (potentially different) auth, reset
+  if (socket?.connected) {
+    socket.disconnect();
+    socket = null;
+  }
   const s = getSocket();
   s.auth = auth;
-  if (!s.connected) s.connect();
+  s.connect();
   return s;
 }

@@ -10,6 +10,7 @@ declare module 'socket.io' {
     role: UserRole;
     houseId?: string;
     username?: string;
+    currentRoom?: string; // M2: properly typed, no more unsafe cast
   }
 }
 

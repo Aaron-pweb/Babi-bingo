@@ -28,6 +28,9 @@ export interface ClientToServerEvents {
 
   /** Request full room state (used for reconnect sync) */
   request_sync: (payload: { roomCode: string }) => void;
+
+  /** Operator: change win pattern before game starts — H4 */
+  set_pattern: (payload: { roomCode: string; pattern: WinPattern }) => void;
 }
 
 // ─────────────────────────────────────────────

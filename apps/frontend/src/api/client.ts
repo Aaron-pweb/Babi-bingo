@@ -3,7 +3,10 @@ const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   const json = await res.json();
@@ -23,10 +26,14 @@ export const api = {
     post<{ uuid: string; token: string }>('/api/auth/guest', { nickname }),
 
   login: (username: string, password: string) =>
-    post<{ uuid: string; houseId: string; houseName: string; accessToken: string }>('/api/auth/login', { username, password }),
+    post<{ uuid: string; houseId: string; houseName: string; accessToken: string; refreshToken: string }>('/api/auth/login', { username, password }),
 
   register: (username: string, password: string, houseName: string) =>
-    post<{ uuid: string; houseId: string; accessToken: string }>('/api/auth/register', { username, password, houseName, role: 'OWNER' }),
+    post<{ uuid: string; houseId: string; accessToken: string; refreshToken?: string }>('/api/auth/register', { username, password, houseName, role: 'OWNER' }),
+
+  // C5: Refresh expired operator access token
+  refreshToken: (refreshToken: string) =>
+    post<{ accessToken: string }>('/api/auth/refresh', { refreshToken }),
 
   createRoom: (token: string, pattern = 'ROW', intervalSeconds = 6) =>
     post<{ code: string; houseName: string; pattern: string; intervalSeconds: number }>('/api/rooms', { pattern, intervalSeconds }, token),

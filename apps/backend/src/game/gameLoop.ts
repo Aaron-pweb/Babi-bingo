@@ -6,7 +6,9 @@ import { validateBingo } from './winValidator';
 import {
   getRoom, updateRoom, getPlayers, getCard,
   saveCards, isOnCooldown, setCooldown,
+  roomKey,
 } from '../rooms/roomManager';
+import { atomicStateTransition } from '../redis/client';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -23,6 +25,13 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
   const room = await getRoom(roomCode);
   if (!room) return;
 
+  // C1: Atomically transition WAITING → PLAYING; if another process beat us, abort
+  const transitioned = await atomicStateTransition(roomKey(roomCode), 'WAITING', 'PLAYING');
+  if (!transitioned) {
+    console.warn(`[GameLoop] start_game race: room ${roomCode} already left WAITING state`);
+    return;
+  }
+
   const players = await getPlayers(roomCode);
   const gamePlayers = players.filter((p) => p.role === 'PLAYER');
 
@@ -32,7 +41,7 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
 
   const deck = initializeDeck();
   await saveCards(roomCode, cards);
-  await updateRoom(roomCode, { state: 'PLAYING', deck, calledNumbers: [] });
+  await updateRoom(roomCode, { deck, calledNumbers: [] });
 
   // Send each player their card privately
   for (const p of gamePlayers) {
@@ -40,21 +49,20 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
     if (s) s.emit('game_starting', { card: cards[p.uuid], pattern: room.pattern, intervalSeconds: room.intervalSeconds });
   }
 
-  // Broadcast to room for display clients (no card)
+  // Broadcast to room for DISPLAY clients (no card)
   io.to(roomCode).emit('game_starting', { pattern: room.pattern, intervalSeconds: room.intervalSeconds });
 
   // Start auto-calling after 3 s countdown
-  setTimeout(() => startGameLoop(io, roomCode), 3000);
+  setTimeout(() => startGameLoop(io, roomCode, room.intervalSeconds), 3000);
 }
 
-async function startGameLoop(io: TypedServer, roomCode: string): Promise<void> {
-  stopGameLoop(roomCode);
+function startGameLoop(io: TypedServer, roomCode: string, intervalSeconds: number): void {
+  stopGameLoop(roomCode); // safety: clear any stale interval
 
   const interval = setInterval(async () => {
     const room = await getRoom(roomCode);
 
-    if (!room || room.state === 'PAUSED') return; // paused — keep interval, skip tick
-
+    if (!room || room.state === 'PAUSED') return; // paused — keep interval alive, skip tick
     if (room.state !== 'PLAYING') { stopGameLoop(roomCode); return; }
 
     if (room.deck.length === 0) {
@@ -68,7 +76,7 @@ async function startGameLoop(io: TypedServer, roomCode: string): Promise<void> {
     await updateRoom(roomCode, { deck: remaining, calledNumbers });
 
     io.to(roomCode).emit('number_called', { number, column, calledNumbers, remaining: remaining.length });
-  }, (await getRoom(roomCode))?.intervalSeconds ?? 5 * 1000);
+  }, intervalSeconds * 1000);
 
   activeIntervals.set(roomCode, interval);
 }
@@ -88,8 +96,12 @@ export async function handleClaimBingo(io: TypedServer, socket: TypedSocket, roo
   const isWin = validateBingo(card, room.calledNumbers, room.pattern);
 
   if (isWin) {
+    // C1: Atomically transition PLAYING → FINISHED
+    // If another player won simultaneously, this returns false and we ignore
+    const won = await atomicStateTransition(roomKey(roomCode), 'PLAYING', 'FINISHED');
+    if (!won) return; // race: another player already won
+
     stopGameLoop(roomCode);
-    await updateRoom(roomCode, { state: 'FINISHED' });
     io.to(roomCode).emit('game_won', {
       winner: { uuid: socket.data.uuid, nickname: socket.data.nickname },
       pattern: room.pattern,

@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { verifyToken, OperatorPayload } from '../auth/tokens';
 import { createRoom, getRoom, getPlayers } from '../rooms/roomManager';
-import { WinPattern } from '@babi-bingo/shared';
+import { validate, CreateRoomSchema } from '../middleware/validate';
+import type { WinPattern } from '@babi-bingo/shared';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ const router = Router();
 async function requireOperatorAuth(
   req: Request,
   res: Response,
-  next: () => void
+  next: () => void,
 ): Promise<void> {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) {
@@ -31,23 +32,17 @@ async function requireOperatorAuth(
   }
 }
 
-// ─────────────────────────────────────────────
-//  POST /api/rooms
-//  Creates a new room. Returns room code.
-// ─────────────────────────────────────────────
-router.post('/', requireOperatorAuth, async (req: Request, res: Response): Promise<void> => {
+// POST /api/rooms — H7 validates body, requireOperatorAuth validates token
+router.post('/', requireOperatorAuth, validate(CreateRoomSchema), async (req: Request, res: Response): Promise<void> => {
   const auth = req.body.__auth as OperatorPayload;
-  const { pattern, intervalSeconds } = req.body as {
-    pattern?: WinPattern;
-    intervalSeconds?: number;
-  };
+  const { pattern, intervalSeconds } = req.body as { pattern?: WinPattern; intervalSeconds?: number };
 
   const room = await createRoom(
     (auth as unknown as { houseName?: string }).houseName ?? 'Bingo House',
     auth.uuid,
     auth.houseId,
     pattern ?? 'ROW',
-    intervalSeconds ?? 5
+    intervalSeconds ?? 5,
   );
 
   res.status(201).json({
@@ -59,10 +54,7 @@ router.post('/', requireOperatorAuth, async (req: Request, res: Response): Promi
   });
 });
 
-// ─────────────────────────────────────────────
-//  GET /api/rooms/:code
-//  Public — returns room info (no sensitive data)
-// ─────────────────────────────────────────────
+// GET /api/rooms/:code — public
 router.get('/:code', async (req: Request, res: Response): Promise<void> => {
   const room = await getRoom(req.params.code);
   if (!room) {

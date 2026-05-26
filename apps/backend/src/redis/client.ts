@@ -43,3 +43,35 @@ export async function redisDel(key: string): Promise<void> {
 export async function redisExpire(key: string, ttlSeconds: number): Promise<void> {
   await redis.expire(key, ttlSeconds);
 }
+
+// ─────────────────────────────────────────────
+//  C1: Atomic state transition via Lua script
+//  Reads the JSON object at `key`, checks that
+//  obj.state === fromState, then sets obj.state
+//  = toState and writes back atomically.
+//  Returns true if the transition succeeded.
+// ─────────────────────────────────────────────
+const TRANSITION_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local obj = cjson.decode(raw)
+if obj.state ~= ARGV[1] then return 0 end
+obj.state = ARGV[2]
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+  redis.call('SETEX', KEYS[1], ttl, cjson.encode(obj))
+else
+  redis.call('SET', KEYS[1], cjson.encode(obj))
+end
+return 1
+`;
+
+export async function atomicStateTransition(
+  key: string,
+  fromState: string,
+  toState: string,
+): Promise<boolean> {
+  const result = await redis.eval(TRANSITION_LUA, 1, key, fromState, toState);
+  return result === 1;
+}
+

@@ -4,9 +4,15 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? 'INSECURE_DEV_SECRET_CHANGE_ME'
-);
+
+// C3: Never fall back to a hardcoded secret — fail loudly at startup
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) {
+  throw new Error('FATAL: JWT_SECRET environment variable is required. Generate one with: openssl rand -base64 64');
+}
+
+const SECRET = new TextEncoder().encode(jwtSecret);
+
 
 // ─────────────────────────────────────────────
 //  Token Payload Shapes

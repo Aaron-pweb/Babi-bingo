@@ -12,6 +12,10 @@ const key = {
   cooldowns: (code: string) => `room:${code}:cooldowns`,
 };
 
+/** Exported so callers (e.g. gameLoop) can build the Redis key for atomic ops */
+export const roomKey = key.room;
+
+
 const ROOM_TTL = 60 * 60 * 8; // 8 hours
 
 // ─────────────────────────────────────────────
@@ -29,6 +33,21 @@ export interface RoomData {
   houseId: string;
   createdAt: number;
 }
+
+// M1: Shared helper — eliminates copy-paste room object in join_room, join_display, request_sync
+import type { RoomInfo } from '@babi-bingo/shared';
+export function toRoomInfo(room: RoomData, playerCount: number): RoomInfo {
+  return {
+    code: room.code,
+    houseName: room.houseName,
+    state: room.state,
+    pattern: room.pattern,
+    calledNumbers: room.calledNumbers,
+    playerCount,
+    intervalSeconds: room.intervalSeconds,
+  };
+}
+
 
 // ─────────────────────────────────────────────
 //  Room CRUD
