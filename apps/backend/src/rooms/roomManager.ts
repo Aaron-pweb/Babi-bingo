@@ -1,5 +1,6 @@
 import { GameState, WinPattern, BingoCard, Player } from '@babi-bingo/shared';
-import { redisGet, redisSet, redisDel } from '../redis/client';
+import type { RoomInfo } from '@babi-bingo/shared';
+import { redis, redisGet, redisSet, redisDel } from '../redis/client';
 import { generateRoomCode } from './roomCodes';
 
 // ─────────────────────────────────────────────
@@ -7,19 +8,19 @@ import { generateRoomCode } from './roomCodes';
 // ─────────────────────────────────────────────
 const key = {
   room:      (code: string) => `room:${code}`,
-  players:   (code: string) => `room:${code}:players`,
-  cards:     (code: string) => `room:${code}:cards`,
-  cooldowns: (code: string) => `room:${code}:cooldowns`,
+  players:   (code: string) => `room:${code}:players`,   // Redis HASH: uuid → JSON
+  cards:     (code: string) => `room:${code}:cards`,      // Redis HASH: uuid → JSON
+  cooldowns: (code: string) => `room:${code}:cooldowns`,  // Redis HASH: uuid → timestamp string
 };
 
-/** Exported so callers (e.g. gameLoop) can build the Redis key for atomic ops */
+/** Exported so game loop can build the Redis key for atomic Lua transitions */
 export const roomKey = key.room;
 
-
-const ROOM_TTL = 60 * 60 * 8; // 8 hours
+const ROOM_TTL     = 60 * 60 * 8; // 8 hours in seconds
+const COOLDOWN_MS  = 3_000;
 
 // ─────────────────────────────────────────────
-//  Room State Shape (stored in Redis)
+//  Room State Shape (stored in Redis as JSON string)
 // ─────────────────────────────────────────────
 export interface RoomData {
   code: string;
@@ -34,8 +35,7 @@ export interface RoomData {
   createdAt: number;
 }
 
-// M1: Shared helper — eliminates copy-paste room object in join_room, join_display, request_sync
-import type { RoomInfo } from '@babi-bingo/shared';
+// M1: Single source of truth for the RoomInfo projection sent to clients
 export function toRoomInfo(room: RoomData, playerCount: number): RoomInfo {
   return {
     code: room.code,
@@ -48,9 +48,8 @@ export function toRoomInfo(room: RoomData, playerCount: number): RoomInfo {
   };
 }
 
-
 // ─────────────────────────────────────────────
-//  Room CRUD
+//  Room CRUD  (room object stored as plain JSON string)
 // ─────────────────────────────────────────────
 
 export async function createRoom(
@@ -58,26 +57,17 @@ export async function createRoom(
   operatorUuid: string,
   houseId: string,
   pattern: WinPattern = 'ROW',
-  intervalSeconds = 5
+  intervalSeconds = 5,
 ): Promise<RoomData> {
   const code = generateRoomCode();
-
   const room: RoomData = {
-    code,
-    houseName,
-    state: 'WAITING',
-    pattern,
-    calledNumbers: [],
-    deck: [],
-    intervalSeconds,
-    operatorUuid,
-    houseId,
-    createdAt: Date.now(),
+    code, houseName, state: 'WAITING', pattern,
+    calledNumbers: [], deck: [], intervalSeconds,
+    operatorUuid, houseId, createdAt: Date.now(),
   };
-
   await redisSet(key.room(code), room, ROOM_TTL);
-  await redisSet<Player[]>(key.players(code), [], ROOM_TTL);
-
+  // Players hash starts empty; just set TTL via a placeholder approach:
+  // we touch it on first addPlayer — no need to pre-create the hash.
   return room;
 }
 
@@ -96,75 +86,91 @@ export async function updateRoom(code: string, patch: Partial<RoomData>): Promis
 export async function deleteRoom(code: string): Promise<void> {
   await Promise.all([
     redisDel(key.room(code)),
-    redisDel(key.players(code)),
-    redisDel(key.cards(code)),
-    redisDel(key.cooldowns(code)),
+    redis.del(key.players(code)),
+    redis.del(key.cards(code)),
+    redis.del(key.cooldowns(code)),
   ]);
 }
 
 // ─────────────────────────────────────────────
-//  Player Management
+//  Player Management  — M3: Redis HASH (O(1) per-player ops)
+//  Key:   room:{code}:players
+//  Field: player UUID
+//  Value: JSON-serialised Player object
 // ─────────────────────────────────────────────
 
 export async function getPlayers(code: string): Promise<Player[]> {
-  return (await redisGet<Player[]>(key.players(code))) ?? [];
+  const hash = await redis.hgetall(key.players(code));
+  if (!hash) return [];
+  return Object.values(hash).map((v) => JSON.parse(v) as Player);
 }
 
+/** Returns the full updated player list after add/update. */
 export async function addPlayer(code: string, player: Player): Promise<Player[]> {
-  const players = await getPlayers(code);
-  const exists = players.some((p) => p.uuid === player.uuid);
-  if (exists) {
-    // Update socket ID on reconnect
-    const updated = players.map((p) => (p.uuid === player.uuid ? player : p));
-    await redisSet(key.players(code), updated, ROOM_TTL);
-    return updated;
-  }
-  const updated = [...players, player];
-  await redisSet(key.players(code), updated, ROOM_TTL);
-  return updated;
+  // HSET: O(1) — overwrites if UUID already exists (handles reconnect)
+  await redis.hset(key.players(code), player.uuid, JSON.stringify(player));
+  await redis.expire(key.players(code), ROOM_TTL);
+  return getPlayers(code);
 }
 
+/** Returns the remaining player list after removal. */
 export async function removePlayer(code: string, uuid: string): Promise<Player[]> {
-  const players = await getPlayers(code);
-  const updated = players.filter((p) => p.uuid !== uuid);
-  await redisSet(key.players(code), updated, ROOM_TTL);
-  return updated;
+  // HDEL: O(1) — no read-modify-write cycle
+  await redis.hdel(key.players(code), uuid);
+  return getPlayers(code);
 }
 
 // ─────────────────────────────────────────────
-//  Card Storage
+//  Card Storage  — M3: Redis HASH (O(1) per-card ops)
+//  Key:   room:{code}:cards
+//  Field: player UUID
+//  Value: JSON-serialised BingoCard (number[][]  with nulls for FREE)
 // ─────────────────────────────────────────────
 
 export async function saveCards(
   code: string,
-  cards: Record<string, BingoCard>
+  cards: Record<string, BingoCard>,
 ): Promise<void> {
-  await redisSet(key.cards(code), cards, ROOM_TTL);
+  const entries = Object.entries(cards);
+  if (entries.length === 0) return;
+
+  // Build flat args array for a single HSET call: [field1, val1, field2, val2, ...]
+  const args: string[] = [];
+  for (const [uuid, card] of entries) {
+    args.push(uuid, JSON.stringify(card));
+  }
+  await redis.hset(key.cards(code), ...args);
+  await redis.expire(key.cards(code), ROOM_TTL);
 }
 
+/** O(1) — fetches a single player's card without loading all cards */
 export async function getCard(code: string, uuid: string): Promise<BingoCard | null> {
-  const cards = await redisGet<Record<string, BingoCard>>(key.cards(code));
-  return cards?.[uuid] ?? null;
+  const raw = await redis.hget(key.cards(code), uuid);
+  return raw ? (JSON.parse(raw) as BingoCard) : null;
 }
 
 export async function getAllCards(code: string): Promise<Record<string, BingoCard>> {
-  return (await redisGet<Record<string, BingoCard>>(key.cards(code))) ?? {};
+  const hash = await redis.hgetall(key.cards(code));
+  if (!hash) return {};
+  return Object.fromEntries(
+    Object.entries(hash).map(([uuid, v]) => [uuid, JSON.parse(v) as BingoCard]),
+  );
 }
 
 // ─────────────────────────────────────────────
-//  False-Bingo Cooldown
+//  False-Bingo Cooldown  — M3: Redis HASH (O(1) per-player)
+//  Key:   room:{code}:cooldowns
+//  Field: player UUID
+//  Value: Unix timestamp string (ms)
 // ─────────────────────────────────────────────
 
-const COOLDOWN_MS = 3000;
-
 export async function isOnCooldown(code: string, uuid: string): Promise<boolean> {
-  const cooldowns = (await redisGet<Record<string, number>>(key.cooldowns(code))) ?? {};
-  const last = cooldowns[uuid];
-  return last !== undefined && Date.now() - last < COOLDOWN_MS;
+  const raw = await redis.hget(key.cooldowns(code), uuid); // O(1)
+  if (!raw) return false;
+  return Date.now() - parseInt(raw, 10) < COOLDOWN_MS;
 }
 
 export async function setCooldown(code: string, uuid: string): Promise<void> {
-  const cooldowns = (await redisGet<Record<string, number>>(key.cooldowns(code))) ?? {};
-  cooldowns[uuid] = Date.now();
-  await redisSet(key.cooldowns(code), cooldowns, ROOM_TTL);
+  await redis.hset(key.cooldowns(code), uuid, Date.now().toString()); // O(1) — no read first
+  await redis.expire(key.cooldowns(code), ROOM_TTL);
 }

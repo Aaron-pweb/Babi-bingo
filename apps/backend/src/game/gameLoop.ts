@@ -1,84 +1,60 @@
 import { Server, Socket } from 'socket.io';
 import { ClientToServerEvents, ServerToClientEvents, BingoCard } from '@babi-bingo/shared';
 import { generateBingoCard } from './cardGenerator';
-import { initializeDeck, drawNumber } from './caller';
+import { initializeDeck } from './caller';
 import { validateBingo } from './winValidator';
 import {
   getRoom, updateRoom, getPlayers, getCard,
-  saveCards, isOnCooldown, setCooldown,
-  roomKey,
+  saveCards, isOnCooldown, setCooldown, roomKey,
 } from '../rooms/roomManager';
 import { atomicStateTransition } from '../redis/client';
+import { scheduleNextTick } from '../queues/gameQueue'; // C4: BullMQ replaces setInterval
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
-/** In-memory interval registry — one entry per active game room */
-const activeIntervals = new Map<string, NodeJS.Timeout>();
-
-export function stopGameLoop(roomCode: string): void {
-  const t = activeIntervals.get(roomCode);
-  if (t) { clearInterval(t); activeIntervals.delete(roomCode); }
-}
+// ─────────────────────────────────────────────
+//  C4: No more in-memory interval registry.
+//  Game loop is now a BullMQ job chain in Redis.
+//  To stop: set room.state ≠ 'PLAYING' — the
+//  worker checks state on every tick and won't
+//  reschedule when the game is not PLAYING.
+// ─────────────────────────────────────────────
 
 export async function handleStartGame(io: TypedServer, roomCode: string): Promise<void> {
   const room = await getRoom(roomCode);
   if (!room) return;
 
-  // C1: Atomically transition WAITING → PLAYING; if another process beat us, abort
+  // C1: Atomically transition WAITING → PLAYING — prevents double-start races
   const transitioned = await atomicStateTransition(roomKey(roomCode), 'WAITING', 'PLAYING');
   if (!transitioned) {
-    console.warn(`[GameLoop] start_game race: room ${roomCode} already left WAITING state`);
+    console.warn(`[GameLoop] start_game race: room ${roomCode} already left WAITING`);
     return;
   }
 
   const players = await getPlayers(roomCode);
   const gamePlayers = players.filter((p) => p.role === 'PLAYER');
 
-  // Generate a unique card per player
+  // Generate and persist a unique card per player (M3: O(1) HGET per card)
   const cards: Record<string, BingoCard> = {};
   for (const p of gamePlayers) cards[p.uuid] = generateBingoCard();
 
   const deck = initializeDeck();
-  await saveCards(roomCode, cards);
+  await saveCards(roomCode, cards);           // M3: HSET per card
   await updateRoom(roomCode, { deck, calledNumbers: [] });
 
-  // Send each player their card privately
+  // Deliver each player their private card
   for (const p of gamePlayers) {
     const s = io.sockets.sockets.get(p.socketId);
     if (s) s.emit('game_starting', { card: cards[p.uuid], pattern: room.pattern, intervalSeconds: room.intervalSeconds });
   }
 
-  // Broadcast to room for DISPLAY clients (no card)
+  // Broadcast to room so DISPLAY clients know the game started
   io.to(roomCode).emit('game_starting', { pattern: room.pattern, intervalSeconds: room.intervalSeconds });
 
-  // Start auto-calling after 3 s countdown
-  setTimeout(() => startGameLoop(io, roomCode, room.intervalSeconds), 3000);
-}
-
-function startGameLoop(io: TypedServer, roomCode: string, intervalSeconds: number): void {
-  stopGameLoop(roomCode); // safety: clear any stale interval
-
-  const interval = setInterval(async () => {
-    const room = await getRoom(roomCode);
-
-    if (!room || room.state === 'PAUSED') return; // paused — keep interval alive, skip tick
-    if (room.state !== 'PLAYING') { stopGameLoop(roomCode); return; }
-
-    if (room.deck.length === 0) {
-      await updateRoom(roomCode, { state: 'FINISHED' });
-      stopGameLoop(roomCode);
-      return;
-    }
-
-    const { number, column, remaining } = drawNumber(room.deck);
-    const calledNumbers = [...room.calledNumbers, number];
-    await updateRoom(roomCode, { deck: remaining, calledNumbers });
-
-    io.to(roomCode).emit('number_called', { number, column, calledNumbers, remaining: remaining.length });
-  }, intervalSeconds * 1000);
-
-  activeIntervals.set(roomCode, interval);
+  // C4: Schedule the first BullMQ tick after 3 s countdown
+  //     Each tick will schedule the next one — self-perpetuating chain
+  await scheduleNextTick(roomCode, room.intervalSeconds, 3000 + room.intervalSeconds * 1000);
 }
 
 export async function handleClaimBingo(io: TypedServer, socket: TypedSocket, roomCode: string): Promise<void> {
@@ -90,25 +66,25 @@ export async function handleClaimBingo(io: TypedServer, socket: TypedSocket, roo
     return;
   }
 
-  const card = await getCard(roomCode, socket.data.uuid);
+  const card = await getCard(roomCode, socket.data.uuid); // M3: O(1) HGET
   if (!card) return;
 
   const isWin = validateBingo(card, room.calledNumbers, room.pattern);
 
   if (isWin) {
-    // C1: Atomically transition PLAYING → FINISHED
-    // If another player won simultaneously, this returns false and we ignore
+    // C1: Atomic PLAYING → FINISHED — only the first winner wins
     const won = await atomicStateTransition(roomKey(roomCode), 'PLAYING', 'FINISHED');
-    if (!won) return; // race: another player already won
+    if (!won) return; // Another player won the race — ignore
 
-    stopGameLoop(roomCode);
+    // C4: No stopGameLoop() call needed — the BullMQ worker reads state from
+    //     Redis on its next tick and sees FINISHED, so it won't reschedule.
     io.to(roomCode).emit('game_won', {
       winner: { uuid: socket.data.uuid, nickname: socket.data.nickname },
       pattern: room.pattern,
       calledNumbers: room.calledNumbers,
     });
   } else {
-    await setCooldown(roomCode, socket.data.uuid);
+    await setCooldown(roomCode, socket.data.uuid); // M3: O(1) HSET
     io.to(roomCode).emit('false_alarm', {
       uuid: socket.data.uuid,
       nickname: socket.data.nickname,

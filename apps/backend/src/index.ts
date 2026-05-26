@@ -9,9 +9,10 @@ import { ClientToServerEvents, ServerToClientEvents } from '@babi-bingo/shared';
 
 import { redis } from './redis/client';
 import { socketAuthMiddleware } from './middleware/socketAuth';
-import { globalErrorHandler } from './middleware/errorHandler'; // H6
+import { globalErrorHandler } from './middleware/errorHandler';
 import { registerRoomHandlers } from './socket/roomHandlers';
 import { registerControlHandlers } from './socket/controlHandlers';
+import { startGameWorker } from './queues/gameQueue'; // C4: BullMQ worker
 import authRoutes from './routes/authRoutes';
 import roomRoutes from './routes/roomRoutes';
 
@@ -93,8 +94,14 @@ app.use(globalErrorHandler);
 // ─────────────────────────────────────────────
 //  Boot + Graceful Shutdown (H5)
 // ─────────────────────────────────────────────
+import type { Worker } from 'bullmq';
+let gameWorker: Worker | null = null;
+
 async function main(): Promise<void> {
   await redis.connect();
+
+  // C4: Start BullMQ game tick worker (must be after io is created)
+  gameWorker = startGameWorker(io);
 
   httpServer.listen(PORT, () => {
     console.log(`\n🎱  Babi-Bingo server running on http://localhost:${PORT}`);
@@ -106,11 +113,11 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`\n[Shutdown] Received ${signal}, shutting down gracefully…`);
   httpServer.close(async () => {
     console.log('[Shutdown] HTTP server closed');
+    if (gameWorker) await gameWorker.close(); // C4: stop accepting new jobs
     await redis.quit();
     console.log('[Shutdown] Redis connection closed');
     process.exit(0);
   });
-  // Force exit after 10s if something hangs
   setTimeout(() => {
     console.error('[Shutdown] Forced exit after timeout');
     process.exit(1);
