@@ -44,7 +44,7 @@ router.post('/register', validate(RegisterSchema), async (req: Request, res: Res
 
   operators.set(username, { uuid, username, passwordHash, role: resolvedRole, houseId, houseName });
 
-  const accessToken = await signAccessToken(uuid, resolvedRole, houseId, username);
+  const accessToken = await signAccessToken(uuid, resolvedRole, houseId, username, houseName);
   const refreshToken = await signRefreshToken(uuid);
 
   res.status(201).json({ uuid, houseId, accessToken, refreshToken });
@@ -61,7 +61,7 @@ router.post('/login', validate(LoginSchema), async (req: Request, res: Response)
     return;
   }
 
-  const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username);
+  const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username, op.houseName);
   const refreshToken = await signRefreshToken(op.uuid);
 
   res.json({ uuid: op.uuid, houseId: op.houseId, houseName: op.houseName, accessToken, refreshToken });
@@ -84,7 +84,7 @@ router.post('/refresh', validate(RefreshSchema), async (req: Request, res: Respo
       return;
     }
 
-    const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username);
+    const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username, op.houseName);
     res.json({ accessToken });
   } catch {
     res.status(401).json({ error: 'Refresh token invalid or expired' });

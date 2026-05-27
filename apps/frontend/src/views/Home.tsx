@@ -2,24 +2,22 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { connectSocket } from '../socket/client';
+import { useAuth } from '../contexts/AuthContext';
 
-// H8: Separate auth modes — no more silent register fallback on login fail
 type Tab = 'player' | 'login' | 'register';
 
 export default function Home() {
   const nav = useNavigate();
   const [params] = useSearchParams();
+  const { setPlayerSession, setOpSession } = useAuth(); // L5
   const authError = params.get('error');
 
   const [tab, setTab] = useState<Tab>('player');
   const [error, setError] = useState(authError === 'auth_required' ? 'Session expired. Please log in again.' : '');
   const [loading, setLoading] = useState(false);
 
-  // Player state
   const [roomCode, setRoomCode] = useState('');
   const [nickname, setNickname] = useState('');
-
-  // Operator state
   const [opUser, setOpUser] = useState('');
   const [opPass, setOpPass] = useState('');
   const [opHouse, setOpHouse] = useState('');
@@ -31,9 +29,7 @@ export default function Home() {
     try {
       await api.getRoom(roomCode.toUpperCase());
       const { uuid, token } = await api.guestToken(nickname.trim());
-      localStorage.setItem('player_uuid', uuid);
-      localStorage.setItem('player_token', token);
-      localStorage.setItem('player_nickname', nickname.trim());
+      setPlayerSession(uuid, token, nickname.trim()); // L5: context handles localStorage
       const socket = connectSocket({ token });
       socket.emit('join_room', { roomCode: roomCode.toUpperCase(), token });
       socket.once('room_joined', () => nav(`/room/${roomCode.toUpperCase()}`));
@@ -44,15 +40,13 @@ export default function Home() {
     }
   }
 
-  // H8: Login only — does NOT fall back to register
   async function operatorLogin() {
     setError('');
     setLoading(true);
     try {
       const data = await api.login(opUser, opPass);
       const room = await api.createRoom(data.accessToken);
-      localStorage.setItem('op_token', data.accessToken);
-      localStorage.setItem('op_refresh', data.refreshToken ?? '');
+      setOpSession(data.accessToken, data.refreshToken); // L5
       nav(`/operator/${room.code}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Login failed');
@@ -60,15 +54,14 @@ export default function Home() {
     }
   }
 
-  // H8: Register only — explicit separate flow
   async function operatorRegister() {
     setError('');
-    if (!opHouse.trim()) { setError('House name is required to register'); return; }
+    if (!opHouse.trim()) { setError('House name is required'); return; }
     setLoading(true);
     try {
       const data = await api.register(opUser, opPass, opHouse.trim());
       const room = await api.createRoom(data.accessToken);
-      localStorage.setItem('op_token', data.accessToken);
+      setOpSession(data.accessToken); // L5
       nav(`/operator/${room.code}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Registration failed');
@@ -77,21 +70,19 @@ export default function Home() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'player', label: '🎮 Join Game' },
-    { id: 'login', label: '🎛 Operator' },
-    { id: 'register', label: '✨ Register' },
+    { id: 'player',   label: '🎮 Join Game' },
+    { id: 'login',    label: '🎛 Operator'  },
+    { id: 'register', label: '✨ Register'  },
   ];
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-bg">
-      {/* Logo */}
       <div className="mb-10 text-center">
         <div className="text-6xl mb-3">🎱</div>
         <h1 className="text-4xl font-black text-white tracking-tight">Babi <span className="text-gold">Bingo</span></h1>
         <p className="text-dim mt-2">The live bingo platform</p>
       </div>
 
-      {/* Tab switcher */}
       <div className="flex bg-surface border border-border rounded-xl p-1 mb-6 w-full max-w-sm">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => { setTab(t.id); setError(''); }}

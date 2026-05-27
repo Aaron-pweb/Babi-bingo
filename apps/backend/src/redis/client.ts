@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import dotenv from 'dotenv';
+import { logger } from '../logger';
 
 dotenv.config();
 
@@ -10,8 +11,8 @@ export const redis = new Redis(REDIS_URL, {
   maxRetriesPerRequest: 3,
 });
 
-redis.on('connect', () => console.log('[Redis] Connected'));
-redis.on('error', (err) => console.error('[Redis] Error:', err.message));
+redis.on('connect', () => logger.info('[Redis] Connected'));
+redis.on('error', (err) => logger.error({ err }, '[Redis] Error'));
 
 // ─────────────────────────────────────────────
 //  Typed wrapper helpers

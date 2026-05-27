@@ -8,6 +8,7 @@ const router = Router();
 
 /**
  * Middleware: extract operator/owner from Bearer token.
+ * Stores verified payload in res.locals.auth so it survives Zod body replacement.
  */
 async function requireOperatorAuth(
   req: Request,
@@ -25,20 +26,21 @@ async function requireOperatorAuth(
       res.status(403).json({ error: 'Operator or Owner role required' });
       return;
     }
-    req.body.__auth = payload;
+    // Store in res.locals — survives validate() replacing req.body
+    res.locals.auth = payload;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
 
-// POST /api/rooms — H7 validates body, requireOperatorAuth validates token
+// POST /api/rooms
 router.post('/', requireOperatorAuth, validate(CreateRoomSchema), async (req: Request, res: Response): Promise<void> => {
-  const auth = req.body.__auth as OperatorPayload;
+  const auth = res.locals.auth as OperatorPayload; // safe: set by requireOperatorAuth
   const { pattern, intervalSeconds } = req.body as { pattern?: WinPattern; intervalSeconds?: number };
 
   const room = await createRoom(
-    (auth as unknown as { houseName?: string }).houseName ?? 'Bingo House',
+    auth.houseName,
     auth.uuid,
     auth.houseId,
     pattern ?? 'ROW',

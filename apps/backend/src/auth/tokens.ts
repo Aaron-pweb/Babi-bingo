@@ -29,6 +29,7 @@ export interface OperatorPayload extends JWTPayload {
   role: 'OPERATOR' | 'OWNER';
   houseId: string;
   username: string;
+  houseName: string;
 }
 
 export type AuthPayload = GuestPayload | OperatorPayload;
@@ -56,9 +57,10 @@ export async function signAccessToken(
   uuid: string,
   role: 'OPERATOR' | 'OWNER',
   houseId: string,
-  username: string
+  username: string,
+  houseName: string,
 ): Promise<string> {
-  return new SignJWT({ uuid, role, houseId, username })
+  return new SignJWT({ uuid, role, houseId, username, houseName })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import type { BingoCard as BingoCardType } from '@babi-bingo/shared';
 import { connectSocket, getSocket } from '../socket/client';
 import BingoCard from '../components/BingoCard';
+import { useAuth } from '../contexts/AuthContext';
 
 // M6: Defined outside component — not recreated on every render
 const COL_COLOR: Record<string, string> = { B: 'text-B', I: 'text-I', N: 'text-N', G: 'text-G', O: 'text-O' };
@@ -16,6 +17,7 @@ const STATUS_COLOR: Record<string, string> = {
 export default function PlayerRoom() {
   const { code } = useParams<{ code: string }>();
   const nav = useNavigate();
+  const { playerToken, playerNickname, clearAll } = useAuth(); // L5
   const [card, setCard] = useState<BingoCardType | null>(null);
   const [called, setCalled] = useState<number[]>([]);
   const [lastNum, setLastNum] = useState<{ number: number; column: string } | null>(null);
@@ -23,10 +25,10 @@ export default function PlayerRoom() {
   const [winner, setWinner] = useState<string | null>(null);
   const [falseAlarm, setFalseAlarm] = useState(false);
   const [cooldown, setCooldown] = useState(false);
-  const nickname = localStorage.getItem('player_nickname') ?? 'Player';
+  const nickname = playerNickname ?? 'Player'; // L5: from context
 
   useEffect(() => {
-    const token = localStorage.getItem('player_token') ?? '';
+    const token = playerToken ?? ''; // L5: from context
     const socket = connectSocket({ token });
 
     // M7: Named listener references for precise cleanup
@@ -57,9 +59,7 @@ export default function PlayerRoom() {
     // H9: Redirect on auth failure
     const onConnectError = (err: Error) => {
       if (err.message.includes('AUTH')) {
-        localStorage.removeItem('player_token');
-        localStorage.removeItem('player_uuid');
-        localStorage.removeItem('player_nickname');
+        clearAll();
         nav('/?error=auth_required');
       }
     };
@@ -76,7 +76,6 @@ export default function PlayerRoom() {
     socket.emit('request_sync', { roomCode: code! });
 
     return () => {
-      // M7: Remove only our specific handlers
       socket.off('game_starting', onGameStarting);
       socket.off('number_called', onNumberCalled);
       socket.off('game_paused', onGamePaused);
@@ -86,7 +85,8 @@ export default function PlayerRoom() {
       socket.off('sync_state', onSyncState);
       socket.off('connect_error', onConnectError);
     };
-  }, [code, nav]);
+  }, [code, nav, playerToken, clearAll]);
+
 
   const claimBingo = useCallback(() => {
     if (cooldown) return;

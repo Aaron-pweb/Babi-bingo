@@ -3,12 +3,12 @@ import { ClientToServerEvents, ServerToClientEvents, BingoCard } from '@babi-bin
 import { generateBingoCard } from './cardGenerator';
 import { initializeDeck } from './caller';
 import { validateBingo } from './winValidator';
-import {
-  getRoom, updateRoom, getPlayers, getCard,
+import { getRoom, updateRoom, getPlayers, getCard,
   saveCards, isOnCooldown, setCooldown, roomKey,
 } from '../rooms/roomManager';
 import { atomicStateTransition } from '../redis/client';
-import { scheduleNextTick } from '../queues/gameQueue'; // C4: BullMQ replaces setInterval
+import { scheduleNextTick } from '../queues/gameQueue';
+import { logger } from '../logger';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -28,7 +28,7 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
   // C1: Atomically transition WAITING → PLAYING — prevents double-start races
   const transitioned = await atomicStateTransition(roomKey(roomCode), 'WAITING', 'PLAYING');
   if (!transitioned) {
-    console.warn(`[GameLoop] start_game race: room ${roomCode} already left WAITING`);
+    logger.warn({ roomCode }, '[GameLoop] start_game race: room already left WAITING');
     return;
   }
 

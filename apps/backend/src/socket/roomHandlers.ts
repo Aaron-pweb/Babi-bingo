@@ -5,6 +5,7 @@ import {
   toRoomInfo,
 } from '../rooms/roomManager';
 import { requireRole } from '../middleware/socketAuth';
+import { logger } from '../logger';
 import type { WinPattern } from '@babi-bingo/shared';
 
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -51,10 +52,10 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
     await socket.join(roomCode);
     const players = await getPlayers(roomCode);
 
-    // M1: Use shared toRoomInfo helper — no more copy-paste inline object
+    // M1: Use shared toRoomInfo helper
     socket.emit('room_joined', { room: toRoomInfo(room, players.length), players });
     socket.data.currentRoom = roomCode;
-    console.log(`[Socket] Display connected to room ${roomCode}`);
+    logger.info({ roomCode, socketId: socket.id }, '[Socket] Display connected');
   });
 
   // ── request_sync ──────────────────────────────────────────────

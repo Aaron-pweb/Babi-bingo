@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import type { Player } from '@babi-bingo/shared';
 import { connectSocket, getSocket } from '../socket/client';
+import { useAuth } from '../contexts/AuthContext';
 
 const PATTERNS = ['ROW', 'COLUMN', 'DIAGONAL', 'FOUR_CORNERS', 'POSTAGE_STAMP', 'COVERALL'] as const;
 
 export default function OperatorDash() {
   const { code } = useParams<{ code: string }>();
+  const nav = useNavigate();
+  const { opToken, clearAll } = useAuth(); // L5
   const [status, setStatus] = useState('WAITING');
   const [players, setPlayers] = useState<Player[]>([]);
   const [called, setCalled] = useState<number[]>([]);
@@ -14,7 +17,7 @@ export default function OperatorDash() {
   const [pattern, setPattern] = useState('ROW');
 
   useEffect(() => {
-    const token = localStorage.getItem('op_token') ?? '';
+    const token = opToken ?? ''; // L5: from context
     const socket = connectSocket({ token });
 
     socket.on('room_joined', ({ room, players: p }) => {
@@ -26,11 +29,14 @@ export default function OperatorDash() {
     socket.on('game_paused', () => setStatus('PAUSED'));
     socket.on('game_resumed', () => setStatus('PLAYING'));
     socket.on('game_won', () => setStatus('FINISHED'));
+    const onConnectError = (err: Error) => {
+      if (err.message.includes('AUTH')) { clearAll(); nav('/?error=auth_required'); }
+    };
+    socket.on('connect_error', onConnectError);
+    socket.emit('join_room', { roomCode: code!, token: opToken ?? '' });
 
-    socket.emit('join_room', { roomCode: code!, token });
-
-    return () => { socket.off('room_joined'); socket.off('player_joined'); socket.off('player_left'); socket.off('number_called'); socket.off('game_paused'); socket.off('game_resumed'); socket.off('game_won'); };
-  }, [code]);
+    return () => { socket.off('room_joined'); socket.off('player_joined'); socket.off('player_left'); socket.off('number_called'); socket.off('game_paused'); socket.off('game_resumed'); socket.off('game_won'); socket.off('connect_error'); };
+  }, [code, nav, opToken, clearAll]);
 
   const emit = (event: 'start_game' | 'pause_game' | 'resume_game') =>
     getSocket().emit(event, { roomCode: code! });

@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { ClientToServerEvents, ServerToClientEvents } from '@babi-bingo/shared';
 import { getRoom, updateRoom } from '../rooms/roomManager';
 import { drawNumber } from '../game/caller';
+import { logger } from '../logger';
 
 // ─────────────────────────────────────────────
 //  Redis connection config for BullMQ
@@ -116,11 +117,11 @@ export function startGameWorker(
   );
 
   worker.on('failed', (job, err) => {
-    console.error(`[GameWorker] Tick failed for room ${job?.data.roomCode}:`, err.message);
+    logger.error({ roomCode: job?.data.roomCode, err }, '[GameWorker] Tick failed');
   });
 
   worker.on('ready', () => {
-    console.log('[GameWorker] BullMQ worker ready ✅');
+    logger.info('[GameWorker] BullMQ worker ready ✅');
   });
 
   return worker;

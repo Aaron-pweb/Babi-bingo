@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
+import { logger } from '../logger'; // M5
 
 /**
  * H6: Global Express error handler.
  * Must be registered LAST — after all routes.
- * Catches any error passed via next(err) or thrown in async handlers.
  */
 export function globalErrorHandler(
   err: Error,
@@ -11,6 +11,6 @@ export function globalErrorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  console.error('[Error]', err.stack ?? err.message);
+  logger.error({ err }, '[Error] Unhandled route error');
   res.status(500).json({ error: 'Internal server error' });
 }

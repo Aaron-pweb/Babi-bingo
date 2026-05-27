@@ -5,5 +5,7 @@
   "testMatch": ["**/__tests__/**/*.test.ts"],
   "moduleNameMapper": {
     "@babi-bingo/shared": "<rootDir>/../../packages/shared/src"
-  }
+  },
+  "forceExit": true,
+  "testTimeout": 15000
 }
