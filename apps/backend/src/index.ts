@@ -30,7 +30,9 @@ const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173')
 // ─────────────────────────────────────────────
 const app = express();
 
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 // M5: Structured HTTP request logging
 app.use(pinoHttp({ logger }));
 app.use(cors({
