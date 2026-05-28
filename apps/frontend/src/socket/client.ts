@@ -7,7 +7,7 @@ let socket: GameSocket | null = null;
 
 export function getSocket(): GameSocket {
   if (!socket) {
-    socket = io(import.meta.env.VITE_API_URL ?? 'http://localhost:4000', {
+    socket = io(import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:4000`, {
       autoConnect: false,
       reconnection: true,
       reconnectionDelay: 1000,

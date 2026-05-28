@@ -37,7 +37,9 @@ app.use(helmet({
 app.use(pinoHttp({ logger }));
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (!origin || allowedOrigins.includes(origin) || origin.includes('10.') || origin.includes('192.168.') || origin.includes('172.')) {
+      return cb(null, true);
+    }
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,

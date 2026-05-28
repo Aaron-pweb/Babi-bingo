@@ -1,4 +1,5 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+// Dynamically use the current hostname (e.g. 10.13.14.210 on mobile) to reach the backend
+const BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:4000`;
 
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

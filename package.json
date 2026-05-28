@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "dev:frontend": "npm run dev --workspace=apps/frontend -- --host",
     "dev:backend": "npm run dev --workspace=apps/backend",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "test": "npm run test --workspace=apps/backend",
