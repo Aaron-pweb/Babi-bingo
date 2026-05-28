@@ -9,7 +9,7 @@ const PATTERNS = ['ROW', 'COLUMN', 'DIAGONAL', 'FOUR_CORNERS', 'POSTAGE_STAMP', 
 export default function OperatorDash() {
   const { code } = useParams<{ code: string }>();
   const nav = useNavigate();
-  const { opToken, clearAll } = useAuth(); // L5
+  const { token: opToken, clearAll } = useAuth();
   const [status, setStatus] = useState('WAITING');
   const [players, setPlayers] = useState<Player[]>([]);
   const [called, setCalled] = useState<number[]>([]);

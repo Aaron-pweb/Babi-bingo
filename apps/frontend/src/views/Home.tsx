@@ -46,7 +46,7 @@ export default function Home() {
     try {
       const data = await api.login(opUser, opPass);
       const room = await api.createRoom(data.accessToken);
-      setOpSession(data.accessToken, data.refreshToken); // L5
+      setOpSession(data.uuid, data.accessToken, 'OWNER', data.houseName, data.houseId, data.refreshToken);
       nav(`/operator/${room.code}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Login failed');
@@ -61,7 +61,7 @@ export default function Home() {
     try {
       const data = await api.register(opUser, opPass, opHouse.trim());
       const room = await api.createRoom(data.accessToken);
-      setOpSession(data.accessToken); // L5
+      setOpSession(data.uuid, data.accessToken, 'OWNER', opHouse.trim(), data.houseId);
       nav(`/operator/${room.code}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Registration failed');
