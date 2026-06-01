@@ -37,6 +37,18 @@ export const CreateRoomSchema = z.object({
   intervalSeconds: z.number().int().min(3).max(30).optional(),
 });
 
+export const PlayerRegisterSchema = z.object({
+  username: z.string().min(3).max(32),
+  password: z.string().min(6).max(128),
+  nickname: z.string().min(2).max(24).regex(/^[\w\s\u00C0-\u024F-]+$/, 'Invalid nickname'),
+});
+
+export const PlayerLoginSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+
 // ─────────────────────────────────────────────
 //  Generic validation middleware factory
 // ─────────────────────────────────────────────

@@ -17,6 +17,8 @@ import { registerControlHandlers } from './socket/controlHandlers';
 import { startGameWorker, gameQueue } from './queues/gameQueue';
 import authRoutes from './routes/authRoutes';
 import roomRoutes from './routes/roomRoutes';
+import adminRoutes from './routes/adminRoutes';
+import playerRoutes from './routes/playerRoutes';
 import type { Worker } from 'bullmq';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -86,6 +88,8 @@ app.get('/health', async (_req, res) => {
 app.use('/api/auth', authLimiter, authRoutes);
 app.post('/api/rooms', roomCreateLimiter, roomRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/players', playerRoutes);
 
 // H6: Global error handler — MUST be last
 app.use(globalErrorHandler);
