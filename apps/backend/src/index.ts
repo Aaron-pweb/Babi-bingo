@@ -19,6 +19,7 @@ import authRoutes from './routes/authRoutes';
 import roomRoutes from './routes/roomRoutes';
 import adminRoutes from './routes/adminRoutes';
 import playerRoutes from './routes/playerRoutes';
+import ownerRoutes from './routes/ownerRoutes';
 import type { Worker } from 'bullmq';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -90,6 +91,7 @@ app.post('/api/rooms', roomCreateLimiter, roomRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/players', playerRoutes);
+app.use('/api/owner', ownerRoutes);
 
 // H6: Global error handler — MUST be last
 app.use(globalErrorHandler);

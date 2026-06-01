@@ -1,6 +1,6 @@
 const BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:4000`;
 
-// ── HTTP helpers ────────────────────────────────────────────────
+// ── HTTP helpers ─────────────────────────────────────────────────
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -35,12 +35,30 @@ async function patch<T>(path: string, body: unknown, token: string): Promise<T> 
   return json as T;
 }
 
-// ── Response types ──────────────────────────────────────────────
+async function del<T>(path: string, token: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? 'Request failed');
+  return json as T;
+}
+
+// ── Response types ───────────────────────────────────────────────
+
+export interface LoginResponse {
+  uuid: string; role: string;
+  // Players + admin use 'token'; owners/operators use 'accessToken'
+  token?: string; accessToken?: string;
+  nickname?: string; houseName?: string; houseId?: string;
+  refreshToken?: string;
+}
+
 export interface RoomPublicInfo {
   code: string; houseName: string; state: string;
   pattern: string; playerCount: number; calledCount: number;
-  startedAt?: string; finishedAt?: string;
-  accentColor?: string;
+  startedAt?: string; finishedAt?: string; accentColor?: string;
 }
 
 export interface GameHistoryEntry {
@@ -50,8 +68,8 @@ export interface GameHistoryEntry {
 
 export interface HouseInfo {
   houseId: string; houseName: string; ownerUuid: string;
-  ownerUsername: string; activeRooms: number; totalGames: number;
-  suspended: boolean; createdAt: string; accentColor: string;
+  ownerUsername: string; phone: string; activeRooms: number;
+  totalGames: number; suspended: boolean; createdAt: string; accentColor: string;
 }
 
 export interface AdminStats {
@@ -60,44 +78,43 @@ export interface AdminStats {
   operatorWindowOpen: boolean; operatorWindowExpiresAt?: string;
 }
 
-// ── API ─────────────────────────────────────────────────────────
+export interface InviteInfo {
+  token: string; acceptUrl: string; username: string; expiresAt: string;
+}
+
+// ── API ──────────────────────────────────────────────────────────
 export const api = {
 
-  // ── Auth: Owner/Operator ──────────────────────────────────────
+  // ── Unified login (all roles) ─────────────────────────────────
   login: (username: string, password: string) =>
-    post<{ uuid: string; houseId: string; houseName: string; role: string; accessToken: string; refreshToken: string }>(
-      '/api/auth/login', { username, password }),
+    post<LoginResponse>('/api/auth/login', { username, password }),
 
-  register: (username: string, password: string, houseName: string) =>
-    post<{ uuid: string; houseId: string; accessToken: string; refreshToken?: string }>(
-      '/api/auth/register', { username, password, houseName, role: 'OWNER' }),
+  // ── Player registration ───────────────────────────────────────
+  playerRegister: (username: string, password: string, nickname: string, phone: string) =>
+    post<{ uuid: string; role: string; nickname: string; token: string; refreshToken: string }>(
+      '/api/auth/register', { username, password, nickname, phone }),
 
+  // ── Operator accept invite ────────────────────────────────────
+  acceptInvite: (inviteToken: string, password: string, phone: string) =>
+    post<{ uuid: string; role: string; houseName: string; accessToken: string; refreshToken: string }>(
+      '/api/auth/operator/accept-invite', { inviteToken, password, phone }),
+
+  peekInvite: (token: string) =>
+    get<{ houseName: string; username: string }>(`/api/owner/invite/${token}`),
+
+  // ── Token refresh ─────────────────────────────────────────────
   refreshToken: (refreshToken: string) =>
     post<{ accessToken: string }>('/api/auth/refresh', { refreshToken }),
 
-  // ── Auth: Player ──────────────────────────────────────────────
-  playerRegister: (username: string, password: string, nickname: string) =>
-    post<{ uuid: string; token: string; refreshToken: string }>(
-      '/api/auth/player/register', { username, password, nickname }),
+  // ── Auth validate (called by AuthContext on mount) ────────────
+  me: (token: string) =>
+    get<{ uuid: string; role: string; nickname?: string; houseName?: string; houseId?: string }>(
+      '/api/auth/me', token),
 
-  playerLogin: (username: string, password: string) =>
-    post<{ uuid: string; token: string; nickname: string; refreshToken: string }>(
-      '/api/auth/player/login', { username, password }),
-
-  guestToken: (nickname: string) =>
-    post<{ uuid: string; token: string }>('/api/auth/guest', { nickname }),
-
-  // ── Auth: Operator (time-window) ──────────────────────────────
-  checkOpWindow: () =>
-    get<{ open: boolean; expiresAt?: string }>('/api/admin/op-window'),
-
-  registerOperator: (username: string, password: string, houseId: string) =>
-    post<{ uuid: string; accessToken: string; refreshToken: string }>(
-      '/api/auth/operator/register', { username, password, houseId }),
-
-  // ── Rooms ──────────────────────────────────────────────────────
+  // ── Rooms ─────────────────────────────────────────────────────
   getRoom: (code: string) =>
-    get<{ code: string; houseName: string; state: string; pattern: string; calledNumbers: number[]; playerCount: number; accentColor?: string }>(`/api/rooms/${code}`),
+    get<{ code: string; houseName: string; state: string; pattern: string; calledNumbers: number[]; playerCount: number; accentColor?: string }>(
+      `/api/rooms/${code}`),
 
   createRoom: (token: string, pattern = 'ROW', intervalSeconds = 6) =>
     post<{ code: string; houseName: string; pattern: string; intervalSeconds: number }>(
@@ -112,18 +129,33 @@ export const api = {
     get<GameHistoryEntry[]>('/api/players/me/history', token),
 
   // ── Owner ─────────────────────────────────────────────────────
-  updateBranding: (token: string, houseName: string, accentColor: string) =>
-    patch<{ houseName: string; accentColor: string }>('/api/owner/branding', { houseName, accentColor }, token),
+  inviteOperator: (token: string, username: string) =>
+    post<InviteInfo>('/api/owner/operators/invite', { username }, token),
+
+  getMyOperators: (token: string) =>
+    get<{ uuid: string; username: string; phone: string; createdAt: string }[]>(
+      '/api/owner/operators', token),
+
+  removeOperator: (token: string, username: string) =>
+    del<{ removed: boolean }>(`/api/owner/operators/${username}`, token),
 
   // ── Admin ─────────────────────────────────────────────────────
-  adminLogin: (username: string, password: string) =>
-    post<{ uuid: string; token: string }>('/api/auth/admin/login', { username, password }),
-
   getAdminStats: (token: string) =>
     get<AdminStats>('/api/admin/stats', token),
 
   getAdminHouses: (token: string) =>
     get<HouseInfo[]>('/api/admin/houses', token),
+
+  createOwner: (token: string, username: string, password: string, houseName: string, phone: string) =>
+    post<{ uuid: string; houseId: string; houseName: string; username: string }>(
+      '/api/admin/owners', { username, password, houseName, phone }, token),
+
+  getAdminOwners: (token: string) =>
+    get<{ uuid: string; username: string; houseName: string; houseId: string; phone: string; createdAt: string }[]>(
+      '/api/admin/owners', token),
+
+  removeOwner: (token: string, username: string) =>
+    del<{ removed: boolean }>(`/api/admin/owners/${username}`, token),
 
   suspendHouse: (token: string, houseId: string, suspended: boolean) =>
     patch<{ suspended: boolean }>(`/api/admin/houses/${houseId}/suspend`, { suspended }, token),

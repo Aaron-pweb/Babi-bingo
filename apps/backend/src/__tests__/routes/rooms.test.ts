@@ -72,14 +72,25 @@ describe('/api/rooms', () => {
   let accessToken: string;
   let roomCode: string;
 
-  // bcrypt is slow — register once, reuse token for all POST tests
+  // Create an owner directly in the operators store and login to get a token
   beforeAll(async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ username: 'roomop', password: 'roompass', houseName: 'Room House' });
-    expect(res.status).toBe(201);
-    accessToken = res.body.accessToken;
-  }, 20_000); // bcrypt (cost 12) can take ~1-2s — 20s is safe for CI
+    // Import operators map and hash — bcrypt is still real here
+    const { operators } = await import('../../routes/authRoutes');
+    const { hash } = await import('bcryptjs');
+    const { signAccessToken } = await import('../../auth/tokens');
+
+    const uuid    = 'test-owner-uuid';
+    const houseId = 'test-house-id';
+    operators.set('roomop', {
+      uuid, username: 'roomop',
+      passwordHash: await hash('roompass', 12),
+      role: 'OWNER', houseId, houseName: 'Room House',
+      phone: '+251912345678', createdAt: new Date().toISOString(),
+    });
+
+    accessToken = await signAccessToken(uuid, 'OWNER', houseId, 'roomop', 'Room House');
+  }, 20_000);
+
 
   // ── POST /api/rooms ────────────────────────────────────────────
   describe('POST /api/rooms', () => {
