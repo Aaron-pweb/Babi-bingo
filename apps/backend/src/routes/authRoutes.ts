@@ -7,27 +7,27 @@ import {
 import {
   validate, GuestSchema, LoginSchema, PlayerRegisterSchema, RefreshSchema, toE164,
 } from '../middleware/validate';
-import { redis, redisGet, redisSet } from '../redis/client';
+import { redisGet, redisSet } from '../redis/client';
 import { logger } from '../logger';
 
 const router = Router();
 
 // ─────────────────────────────────────────────
-//  In-memory store for Owners & Operators
+//  In-memory store for Owners
 //  (Players live in Redis)
 // ─────────────────────────────────────────────
-export interface OperatorRecord {
+export interface OwnerRecord {
   uuid: string;
   username: string;
   passwordHash: string;
-  role: 'OPERATOR' | 'OWNER';
+  role: 'OWNER';
   houseId: string;
   houseName: string;
   phone: string;          // E.164 e.g. +251912345678
   createdAt: string;
 }
 
-export const operators = new Map<string, OperatorRecord>();
+export const operators = new Map<string, OwnerRecord>();
 
 // ─────────────────────────────────────────────
 //  Admin credentials (seeded from .env)
@@ -63,18 +63,18 @@ router.post('/login', validate(LoginSchema), async (req: Request, res: Response)
     return;
   }
 
-  // 2. Check Owner / Operator
+  // 2. Check Owner (in-memory)
   const op = operators.get(username);
   if (op) {
     if (!(await compare(password, op.passwordHash))) {
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
-    const accessToken  = await signAccessToken(op.uuid, op.role, op.houseId, op.username, op.houseName);
+    const accessToken  = await signAccessToken(op.uuid, 'OWNER', op.houseId, op.username, op.houseName);
     const refreshToken = await signRefreshToken(op.uuid);
-    logger.info({ uuid: op.uuid, role: op.role }, '[Auth] Operator/Owner login');
+    logger.info({ uuid: op.uuid }, '[Auth] Owner login');
     res.json({
-      uuid: op.uuid, role: op.role, houseName: op.houseName, houseId: op.houseId,
+      uuid: op.uuid, role: 'OWNER', houseName: op.houseName, houseId: op.houseId,
       accessToken, refreshToken,
     });
     return;
@@ -122,10 +122,10 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Owner / Operator — look up by uuid
+    // Owner — look up by uuid
     const op = [...operators.values()].find((o) => o.uuid === payload.uuid);
     if (op) {
-      res.json({ uuid: op.uuid, role: op.role, houseName: op.houseName, houseId: op.houseId });
+      res.json({ uuid: op.uuid, role: 'OWNER', houseName: op.houseName, houseId: op.houseId });
       return;
     }
 
@@ -150,9 +150,8 @@ router.post('/register', validate(PlayerRegisterSchema), async (req: Request, re
     username: string; password: string; nickname: string; phone: string;
   };
 
-  const phone = toE164(phoneLocal); // "+251912345678"
+  const phone = toE164(phoneLocal);
 
-  // Uniqueness checks
   const existingByUsername = await redisGet<string>(`player:by-username:${username}`);
   if (existingByUsername) { res.status(409).json({ error: 'Username already taken' }); return; }
 
@@ -190,7 +189,7 @@ router.post('/refresh', validate(RefreshSchema), async (req: Request, res: Respo
 
     const op = [...operators.values()].find((o) => o.uuid === payload.uuid);
     if (op) {
-      const accessToken = await signAccessToken(op.uuid, op.role, op.houseId, op.username, op.houseName);
+      const accessToken = await signAccessToken(op.uuid, 'OWNER', op.houseId, op.username, op.houseName);
       res.json({ accessToken });
       return;
     }
@@ -209,65 +208,13 @@ router.post('/refresh', validate(RefreshSchema), async (req: Request, res: Respo
 });
 
 // ─────────────────────────────────────────────
-//  POST /api/auth/guest  (kept for display-only TV joins)
+//  POST /api/auth/guest  (TV display joins)
 // ─────────────────────────────────────────────
 router.post('/guest', validate(GuestSchema), async (req: Request, res: Response): Promise<void> => {
   const { nickname } = req.body as { nickname: string };
   const uuid = uuidv4();
   const token = await signGuestToken(uuid, nickname.trim());
   res.json({ uuid, token });
-});
-
-// ─────────────────────────────────────────────
-//  POST /api/auth/operator/accept-invite
-// ─────────────────────────────────────────────
-router.post('/operator/accept-invite', async (req: Request, res: Response): Promise<void> => {
-  const { inviteToken, password, phone: phoneLocal } = req.body as {
-    inviteToken?: string; password?: string; phone?: string;
-  };
-
-  if (!inviteToken || !password || !phoneLocal) {
-    res.status(400).json({ error: 'inviteToken, password and phone are required' });
-    return;
-  }
-
-  if (!/^9[0-9]{8}$/.test(phoneLocal)) {
-    res.status(400).json({ error: 'Phone must be 9 digits starting with 9' });
-    return;
-  }
-
-  // Validate invite token from Redis
-  const invite = await redisGet<{
-    houseId: string; houseName: string; ownerUuid: string; username: string;
-  }>(`invite:${inviteToken}`);
-
-  if (!invite) { res.status(410).json({ error: 'Invite link expired or invalid' }); return; }
-
-  const phone = toE164(phoneLocal);
-  if (await isPhoneTaken(phone)) {
-    res.status(409).json({ error: 'Phone number already registered' });
-    return;
-  }
-
-  const uuid         = uuidv4();
-  const passwordHash = await hash(password, 12);
-
-  operators.set(invite.username, {
-    uuid, username: invite.username, passwordHash, role: 'OPERATOR',
-    houseId: invite.houseId, houseName: invite.houseName, phone,
-    createdAt: new Date().toISOString(),
-  });
-
-  await reservePhone(phone, uuid);
-
-  // Consume invite (one-use)
-  await redis.del(`invite:${inviteToken}`);
-
-  const accessToken  = await signAccessToken(uuid, 'OPERATOR', invite.houseId, invite.username, invite.houseName);
-  const refreshToken = await signRefreshToken(uuid);
-
-  logger.info({ uuid, houseId: invite.houseId }, '[Auth] Operator accepted invite');
-  res.status(201).json({ uuid, role: 'OPERATOR', houseName: invite.houseName, accessToken, refreshToken });
 });
 
 export default router;

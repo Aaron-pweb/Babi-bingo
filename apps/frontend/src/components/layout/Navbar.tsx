@@ -17,9 +17,9 @@ export default function Navbar() {
 
   // Role-based navigation links
   const links = (() => {
-    if (role === 'ADMIN')                     return [{ to: '/admin', label: 'Dashboard' }];
-    if (role === 'OWNER' || role === 'OPERATOR') return [{ to: '/owner', label: 'My House' }];
-    if (role === 'PLAYER')                    return [{ to: '/dashboard', label: 'Play' }];
+    if (role === 'ADMIN')  return [{ to: '/admin', label: 'Dashboard' }];
+    if (role === 'OWNER')   return [{ to: '/owner', label: 'My House' }];
+    if (role === 'PLAYER')  return [{ to: '/dashboard', label: 'Play' }];
     return [];
   })();
 
@@ -46,7 +46,7 @@ export default function Navbar() {
           ))}
           {!isAuthenticated && (
             <>
-              <Link to="/auth" className={`nav-link ${isActive('/auth') ? 'active' : ''}`}>Sign In</Link>
+              <Link to="/login" className={`nav-link ${isActive('/login') ? 'active' : ''}`}>Sign In</Link>
             </>
           )}
         </div>
@@ -78,7 +78,7 @@ export default function Navbar() {
               <button onClick={handleLogout} className="btn-outline text-sm px-4 py-2">Sign Out</button>
             </div>
           ) : (
-            <Link to="/auth" className="btn-primary text-sm px-4 py-2">Get Started</Link>
+            <Link to="/login" className="btn-primary text-sm px-4 py-2">Get Started</Link>
           )}
         </div>
       </div>

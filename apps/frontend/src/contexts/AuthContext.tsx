@@ -1,20 +1,20 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 
-export type UserRole = 'PLAYER' | 'OPERATOR' | 'OWNER' | 'ADMIN';
+export type UserRole = 'PLAYER' | 'OWNER' | 'ADMIN';
 
 interface AuthState {
   token:        string | null;
   uuid:         string | null;
   role:         UserRole | null;
   username:     string | null;
-  nickname:     string | null;   // players
-  houseName:    string | null;   // owners / operators
+  nickname:     string | null;
+  houseName:    string | null;
   houseId:      string | null;
   refreshToken: string | null;
 }
 
 interface AuthCtx extends AuthState {
-  authLoading: boolean;  // true while validating token on mount
+  authLoading: boolean;
   isAuthenticated: boolean;
   setSession: (data: {
     uuid: string; token: string; role: UserRole;
@@ -67,10 +67,10 @@ function saveStorage(s: Partial<AuthState>) {
 const BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:4000`;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [auth, setAuth]             = useState<AuthState>(readStorage);
+  const [auth, setAuth]               = useState<AuthState>(readStorage);
   const [authLoading, setAuthLoading] = useState<boolean>(!!localStorage.getItem(KEYS.token));
 
-  // ── On mount: validate stored token with GET /api/auth/me ──────
+  // On mount: validate stored token with GET /api/auth/me
   useEffect(() => {
     const storedToken = localStorage.getItem(KEYS.token);
     if (!storedToken) { setAuthLoading(false); return; }
@@ -84,7 +84,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           uuid: string; role: UserRole;
           nickname?: string; houseName?: string; houseId?: string;
         };
-        // Refresh state from server — role is authoritative
         const patch: Partial<AuthState> = {
           uuid:      data.uuid,
           role:      data.role,
@@ -96,7 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuth((prev) => ({ ...prev, ...patch }));
       })
       .catch(() => {
-        // Token invalid/expired — clear everything
         Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
         setAuth({ token: null, uuid: null, role: null, username: null, nickname: null, houseName: null, houseId: null, refreshToken: null });
       })
@@ -108,7 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuth((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  // ── Unified session setter (replaces setPlayerSession / setOpSession / setAdminSession) ──
   const setSession = useCallback((data: {
     uuid: string; token: string; role: UserRole;
     nickname?: string; houseName?: string; houseId?: string;

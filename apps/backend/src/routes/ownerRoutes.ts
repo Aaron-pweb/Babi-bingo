@@ -1,13 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import { redis } from '../redis/client';
 import { operators } from './authRoutes';
-import { verifyToken } from '../auth/tokens';
+import { verifyToken, OwnerPayload } from '../auth/tokens';
 import { logger } from '../logger';
 
 const router = Router();
-
-const INVITE_TTL_SECONDS = 72 * 60 * 60; // 72 hours
 
 // ─────────────────────────────────────────────
 //  requireOwner middleware
@@ -16,9 +13,7 @@ async function requireOwner(req: Request, res: Response, next: () => void): Prom
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
   try {
-    const payload = await verifyToken(auth.slice(7)) as {
-      uuid?: string; role?: string; houseId?: string;
-    };
+    const payload = await verifyToken(auth.slice(7)) as OwnerPayload;
     if (payload.role !== 'OWNER') { res.status(403).json({ error: 'Owner access required' }); return; }
     res.locals.owner = payload;
     next();
@@ -28,94 +23,69 @@ async function requireOwner(req: Request, res: Response, next: () => void): Prom
 }
 
 // ─────────────────────────────────────────────
-//  POST /api/owner/operators/invite
-//  Generate a one-use invite link for an operator
+//  GET /api/owner/rooms
+//  Returns all rooms belonging to this owner's house
 // ─────────────────────────────────────────────
-router.post('/operators/invite', requireOwner, async (req: Request, res: Response): Promise<void> => {
-  const owner = res.locals.owner as { uuid: string; houseId: string; houseName: string };
-  const { username } = req.body as { username?: string };
+router.get('/rooms', requireOwner, async (_req: Request, res: Response): Promise<void> => {
+  const { uuid: ownerUuid, houseId } = res.locals.owner as OwnerPayload;
 
-  if (!username || username.length < 3) {
-    res.status(400).json({ error: 'username (min 3 chars) is required for the operator' });
-    return;
-  }
+  // Find all room keys in Redis that belong to this owner
+  const allKeys = await redis.keys('room:*');
+  const roomKeys = allKeys.filter(k => !k.includes(':players') && !k.includes(':cards') && !k.includes(':cooldowns') && !k.includes(':meta'));
 
-  if (operators.has(username)) {
-    res.status(409).json({ error: 'Username already taken' });
-    return;
-  }
+  const rooms: object[] = [];
 
-  const token = uuidv4();
-  const invite = {
-    houseId:   owner.houseId,
-    houseName: owner.houseName,
-    ownerUuid: owner.uuid,
-    username,
-    createdAt: new Date().toISOString(),
-  };
+  await Promise.all(roomKeys.map(async (key) => {
+    const raw = await redis.get(key);
+    if (!raw) return;
+    try {
+      const room = JSON.parse(raw);
+      // Only include rooms owned by this house
+      if (room.houseId !== houseId && room.operatorUuid !== ownerUuid) return;
 
-  await redis.setex(`invite:${token}`, INVITE_TTL_SECONDS, JSON.stringify(invite));
+      const playerHash = await redis.hgetall(`room:${room.code}:players`);
+      const playerCount = playerHash ? Object.keys(playerHash).length : 0;
 
-  const acceptUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/invite/${token}`;
+      rooms.push({
+        code:           room.code,
+        state:          room.state,
+        pattern:        room.pattern,
+        calledCount:    room.calledNumbers?.length ?? 0,
+        intervalSeconds: room.intervalSeconds,
+        playerCount,
+        createdAt:      room.createdAt,
+      });
+    } catch { /* skip malformed */ }
+  }));
 
-  logger.info({ ownerUuid: owner.uuid, username, token }, '[Owner] Operator invite created');
-  res.json({
-    token,
-    acceptUrl,
-    username,
-    expiresAt: new Date(Date.now() + INVITE_TTL_SECONDS * 1000).toISOString(),
+  // Sort: active first, then by creation time desc
+  const order: Record<string, number> = { PLAYING: 0, WAITING: 1, PAUSED: 2, FINISHED: 3 };
+  rooms.sort((a: any, b: any) => {
+    const stateOrder = (order[a.state] ?? 9) - (order[b.state] ?? 9);
+    if (stateOrder !== 0) return stateOrder;
+    return b.createdAt - a.createdAt;
   });
+
+  logger.info({ ownerUuid, count: rooms.length }, '[Owner] Rooms fetched');
+  res.json(rooms);
 });
 
 // ─────────────────────────────────────────────
-//  GET /api/owner/operators
-//  List operators under this house
+//  GET /api/owner/profile
+//  Returns owner's account info
 // ─────────────────────────────────────────────
-router.get('/operators', requireOwner, async (_req: Request, res: Response): Promise<void> => {
-  const { houseId } = res.locals.owner as { houseId: string };
-
-  const ops = [...operators.values()]
-    .filter((o) => o.role === 'OPERATOR' && o.houseId === houseId)
-    .map((o) => ({
-      uuid:      o.uuid,
-      username:  o.username,
-      phone:     o.phone,
-      createdAt: o.createdAt,
-    }));
-
-  res.json(ops);
-});
-
-// ─────────────────────────────────────────────
-//  DELETE /api/owner/operators/:username
-//  Remove an operator from this house
-// ─────────────────────────────────────────────
-router.delete('/operators/:username', requireOwner, async (req: Request, res: Response): Promise<void> => {
-  const { houseId } = res.locals.owner as { houseId: string };
-  const { username } = req.params;
-
-  const op = operators.get(username);
-  if (!op || op.role !== 'OPERATOR' || op.houseId !== houseId) {
-    res.status(404).json({ error: 'Operator not found in your house' });
-    return;
-  }
-
-  operators.delete(username);
-  await redis.del(`phone:${op.phone}`);
-
-  logger.warn({ username, houseId }, '[Owner] Operator removed');
-  res.json({ removed: true });
-});
-
-// ─────────────────────────────────────────────
-//  GET /api/owner/invite/:token
-//  Peek at an invite (preview the username/house before accepting)
-// ─────────────────────────────────────────────
-router.get('/invite/:token', async (req: Request, res: Response): Promise<void> => {
-  const raw = await redis.get(`invite:${req.params.token}`);
-  if (!raw) { res.status(410).json({ error: 'Invite link expired or invalid' }); return; }
-  const invite = JSON.parse(raw) as { houseName: string; username: string };
-  res.json({ houseName: invite.houseName, username: invite.username });
+router.get('/profile', requireOwner, async (_req: Request, res: Response): Promise<void> => {
+  const { uuid } = res.locals.owner as OwnerPayload;
+  const owner = [...operators.values()].find(o => o.uuid === uuid);
+  if (!owner) { res.status(404).json({ error: 'Owner not found' }); return; }
+  res.json({
+    uuid:      owner.uuid,
+    username:  owner.username,
+    houseName: owner.houseName,
+    houseId:   owner.houseId,
+    phone:     owner.phone,
+    createdAt: owner.createdAt,
+  });
 });
 
 export default router;

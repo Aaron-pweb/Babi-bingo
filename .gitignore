@@ -3,3 +3,4 @@ bingo_app_development_plan.md
 apps/backend/.env
 apps/backend/.env.example
 apps/frontend/.env
+dump.rdb

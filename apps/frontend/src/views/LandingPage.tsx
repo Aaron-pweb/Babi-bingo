@@ -52,7 +52,7 @@ export default function LandingPage() {
   // Auto-redirect if already logged in
   useEffect(() => {
     if (role === 'ADMIN') nav('/admin', { replace: true });
-    else if (role === 'OWNER' || role === 'OPERATOR') nav('/owner', { replace: true });
+    else if (role === 'OWNER') nav('/owner', { replace: true });
     else if (role === 'PLAYER') nav('/dashboard', { replace: true });
   }, [role, nav]);
 
@@ -87,13 +87,13 @@ export default function LandingPage() {
           <input className="input" placeholder="Room code (e.g. BINGO-7F3K)" value={roomCode}
             onChange={e => setRoomCode(e.target.value.toUpperCase())}
             style={{ maxWidth:260, textAlign:'center', fontWeight:700, letterSpacing:1 }}
-            onKeyDown={e => e.key === 'Enter' && roomCode.length > 3 && nav(`/auth?join=${roomCode}`)} />
-          <button className="btn-primary" onClick={() => roomCode.length > 3 && nav(`/auth?join=${roomCode}`)}>
+            onKeyDown={e => e.key === 'Enter' && roomCode.length > 3 && nav(`/login?join=${roomCode}`)} />
+          <button className="btn-primary" onClick={() => roomCode.length > 3 && nav(`/login?join=${roomCode}`)}>
             Join Game →
           </button>
         </div>
         <div style={{ display:'flex', gap:'1rem', justifyContent:'center', flexWrap:'wrap' }}>
-          <Link to="/auth?tab=owner" className="btn-outline">Open a Bingo House</Link>
+          <Link to="/register" className="btn-outline">Register as Player</Link>
         </div>
       </section>
 

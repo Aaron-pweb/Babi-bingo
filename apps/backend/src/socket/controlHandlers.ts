@@ -17,7 +17,7 @@ async function isRoomOperator(socket: TypedSocket, roomCode: string): Promise<bo
 export function registerControlHandlers(io: TypedServer, socket: TypedSocket): void {
 
   socket.on('start_game', async ({ roomCode }) => {
-    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'OWNER')) return;
     if (!await isRoomOperator(socket, roomCode)) return;
     const room = await getRoom(roomCode);
     if (!room || room.state !== 'WAITING') {
@@ -28,7 +28,7 @@ export function registerControlHandlers(io: TypedServer, socket: TypedSocket): v
   });
 
   socket.on('pause_game', async ({ roomCode }) => {
-    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'OWNER')) return;
     if (!await isRoomOperator(socket, roomCode)) return;
     const room = await getRoom(roomCode);
     if (!room || room.state !== 'PLAYING') { socket.emit('game_error', { code: 'INVALID_STATE', message: 'Not currently playing' }); return; }
@@ -37,7 +37,7 @@ export function registerControlHandlers(io: TypedServer, socket: TypedSocket): v
   });
 
   socket.on('resume_game', async ({ roomCode }) => {
-    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'OWNER')) return;
     if (!await isRoomOperator(socket, roomCode)) return;
     const room = await getRoom(roomCode);
     if (!room || room.state !== 'PAUSED') { socket.emit('game_error', { code: 'INVALID_STATE', message: 'Game is not paused' }); return; }
@@ -46,7 +46,7 @@ export function registerControlHandlers(io: TypedServer, socket: TypedSocket): v
   });
 
   socket.on('kick_player', async ({ roomCode, targetUuid }) => {
-    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'OWNER')) return;
     if (!await isRoomOperator(socket, roomCode)) return;
     const players = await getPlayers(roomCode);
     const target = players.find((p) => p.uuid === targetUuid);

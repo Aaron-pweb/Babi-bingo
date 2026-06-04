@@ -15,7 +15,7 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
 
   // ── join_room ──────────────────────────────────────────────────
   socket.on('join_room', async ({ roomCode }) => {
-    if (!requireRole(socket, 'PLAYER', 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'PLAYER', 'OWNER')) return;
 
     const room = await getRoom(roomCode);
     if (!room) {
@@ -75,7 +75,7 @@ export function registerRoomHandlers(io: TypedServer, socket: TypedSocket): void
 
   // ── set_pattern — H4 ─────────────────────────────────────────
   socket.on('set_pattern', async ({ roomCode, pattern }) => {
-    if (!requireRole(socket, 'OPERATOR', 'OWNER')) return;
+    if (!requireRole(socket, 'OWNER')) return;
     const room = await getRoom(roomCode);
     if (!room) { socket.emit('game_error', { code: 'ROOM_NOT_FOUND', message: `Room ${roomCode} not found` }); return; }
     if (room.operatorUuid !== socket.data.uuid) { socket.emit('game_error', { code: 'FORBIDDEN', message: 'Only the room operator can set the pattern' }); return; }

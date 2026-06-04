@@ -29,7 +29,7 @@ export default function LoginPage() {
       setSession({
         uuid:         data.uuid,
         token,
-        role:         data.role as 'PLAYER' | 'OWNER' | 'OPERATOR' | 'ADMIN',
+        role:         data.role as 'PLAYER' | 'OWNER' | 'ADMIN',
         nickname:     data.nickname,
         houseName:    data.houseName,
         houseId:      data.houseId,
@@ -37,9 +37,9 @@ export default function LoginPage() {
       });
 
       // Route by role
-      if (data.role === 'ADMIN')                         nav('/admin',     { replace: true });
-      else if (data.role === 'OWNER' || data.role === 'OPERATOR') nav('/owner', { replace: true });
-      else                                               nav('/dashboard', { replace: true });
+      if (data.role === 'ADMIN')  nav('/admin',     { replace: true });
+      else if (data.role === 'OWNER') nav('/owner', { replace: true });
+      else                           nav('/dashboard', { replace: true });
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Invalid credentials', 'error');
     } finally {

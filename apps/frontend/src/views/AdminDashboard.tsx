@@ -26,9 +26,6 @@ export default function AdminDashboard() {
   const [coLoading,   setCoLoading]   = useState(false);
   const coPhoneValid = /^9[0-9]{8}$/.test(coPhone);
 
-  // ── Operator window ──────────────────────────────────────────────
-  const [windowMinutes, setWindowMinutes] = useState(30);
-  const [openingWindow, setOpeningWindow] = useState(false);
 
   async function load() {
     if (!token) return;
@@ -67,16 +64,6 @@ export default function AdminDashboard() {
     } catch (e: unknown) { toast(e instanceof Error ? e.message : 'Failed', 'error'); }
   }
 
-  async function openOpWindow() {
-    if (!token) return;
-    setOpeningWindow(true);
-    try {
-      await api.openOpWindow(token, windowMinutes);
-      toast(`Operator registration open for ${windowMinutes} minutes`, 'success');
-      await load();
-    } catch (e: unknown) { toast(e instanceof Error ? e.message : 'Failed', 'error'); }
-    finally { setOpeningWindow(false); }
-  }
 
   const filtered = houses.filter(h =>
     h.houseName.toLowerCase().includes(search.toLowerCase()) ||
@@ -140,28 +127,16 @@ export default function AdminDashboard() {
             )}
 
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1.5rem' }}>
-              {/* Operator window */}
+              {/* Quick actions */}
               <div className="card">
-                <h3 style={{ fontFamily:'Outfit,sans-serif', fontWeight:800, marginBottom:'0.75rem' }}>Operator Registration Window</h3>
-                {stats?.operatorWindowOpen ? (
-                  <div style={{ background:'rgba(52,211,153,0.1)', border:'1px solid #34d39944', borderRadius:10, padding:'0.75rem', marginBottom:'0.75rem' }}>
-                    <p style={{ color:'#34d399', fontWeight:700, fontSize:'0.85rem' }}>✓ Window is OPEN</p>
-                    {stats.operatorWindowExpiresAt && (
-                      <p style={{ color:'var(--dim)', fontSize:'0.75rem', marginTop:2 }}>
-                        Closes at {new Date(stats.operatorWindowExpiresAt).toLocaleTimeString()}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p style={{ color:'var(--muted)', fontSize:'0.85rem', marginBottom:'0.75rem' }}>Registration is currently closed</p>
-                )}
-                <div style={{ display:'flex', gap:'0.5rem', alignItems:'center', marginBottom:'0.75rem' }}>
-                  <input type="number" className="input" value={windowMinutes} min={5} max={480}
-                    onChange={e => setWindowMinutes(Number(e.target.value))} style={{ width:80 }} />
-                  <span style={{ color:'var(--dim)', fontSize:'0.85rem' }}>minutes</span>
-                </div>
-                <button className="btn-primary" style={{ width:'100%' }} onClick={openOpWindow} disabled={openingWindow}>
-                  {openingWindow ? 'Opening…' : 'Open Window'}
+                <h3 style={{ fontFamily:'Outfit,sans-serif', fontWeight:800, marginBottom:'0.75rem' }}>Quick Actions</h3>
+                <button className="btn-primary" style={{ width:'100%', marginBottom:'0.75rem' }}
+                  onClick={() => setView('create-owner')}>
+                  ➕ Create House Owner
+                </button>
+                <button className="btn-outline" style={{ width:'100%' }}
+                  onClick={() => setView('houses')}>
+                  🏠 View All Houses
                 </button>
               </div>
 

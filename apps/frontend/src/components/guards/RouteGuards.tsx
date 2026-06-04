@@ -2,7 +2,6 @@ import { type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-// Spinner shown while AuthContext validates token on mount
 function Loading() {
   return (
     <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
@@ -18,7 +17,7 @@ export function PlayerGuard({ children }: { children: ReactNode }) {
   const { role, authLoading } = useAuth();
   if (authLoading) return <Loading />;
   if (!role) return <Navigate to="/login" replace />;
-  if (role !== 'PLAYER') return <Navigate to="/owner" replace />;
+  if (role !== 'PLAYER') return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -26,7 +25,7 @@ export function OwnerGuard({ children }: { children: ReactNode }) {
   const { role, authLoading } = useAuth();
   if (authLoading) return <Loading />;
   if (!role) return <Navigate to="/login" replace />;
-  if (role !== 'OWNER' && role !== 'OPERATOR') return <Navigate to="/dashboard" replace />;
+  if (role !== 'OWNER') return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 

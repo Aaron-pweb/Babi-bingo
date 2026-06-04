@@ -44,7 +44,6 @@ router.post('/owners', requireAdmin, validate(CreateOwnerSchema), async (req: Re
     return;
   }
 
-  // Check phone uniqueness
   const phoneTaken = await redisGet<string>(`phone:${phone}`);
   if (phoneTaken) { res.status(409).json({ error: 'Phone number already registered' }); return; }
 
@@ -176,26 +175,5 @@ router.patch('/houses/:id/suspend', requireAdmin, async (req: Request, res: Resp
   res.json({ houseId: id, suspended });
 });
 
-// ─────────────────────────────────────────────
-//  GET /api/admin/op-window  (public)
-// ─────────────────────────────────────────────
-router.get('/op-window', async (_req: Request, res: Response): Promise<void> => {
-  const exists = await redisGet<string>('admin:op-window');
-  if (!exists) { res.json({ open: false }); return; }
-  const ttl = await redis.ttl('admin:op-window');
-  res.json({ open: true, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() });
-});
-
-// ─────────────────────────────────────────────
-//  POST /api/admin/op-window/open
-// ─────────────────────────────────────────────
-router.post('/op-window/open', requireAdmin, async (req: Request, res: Response): Promise<void> => {
-  const { minutes } = req.body as { minutes?: number };
-  const mins = Math.min(Math.max(Number(minutes) || 30, 5), 480);
-  await redis.setex('admin:op-window', mins * 60, '1');
-  const expiresAt = new Date(Date.now() + mins * 60_000).toISOString();
-  logger.warn({ minutes: mins, expiresAt }, '[Admin] Operator registration window opened');
-  res.json({ open: true, expiresAt, minutes: mins });
-});
 
 export default router;

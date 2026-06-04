@@ -8,18 +8,46 @@ import { getRoom, updateRoom, getPlayers, getCard,
 } from '../rooms/roomManager';
 import { atomicStateTransition } from '../redis/client';
 import { scheduleNextTick } from '../queues/gameQueue';
+import { redis } from '../redis/client';
 import { logger } from '../logger';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
+const HISTORY_MAX = 50;   // keep last 50 games per player
+
 // ─────────────────────────────────────────────
-//  C4: No more in-memory interval registry.
-//  Game loop is now a BullMQ job chain in Redis.
-//  To stop: set room.state ≠ 'PLAYING' — the
-//  worker checks state on every tick and won't
-//  reschedule when the game is not PLAYING.
+//  Write one history entry for every player who was in the room.
+//  winnerUuid = 'draw' when all 75 balls are called with no winner.
 // ─────────────────────────────────────────────
+async function recordGameHistory(
+  roomCode: string,
+  houseName: string,
+  pattern: string,
+  calledCount: number,
+  winnerUuid: string,
+  playerUuids: string[],
+): Promise<void> {
+  const ts = new Date().toISOString();
+  const pipeline = redis.pipeline();
+
+  for (const uuid of playerUuids) {
+    const entry = JSON.stringify({
+      roomCode,
+      houseName,
+      pattern,
+      result: uuid === winnerUuid ? 'WON' : 'LOST',
+      calledCount,
+      ts,
+    });
+    const histKey = `player:${uuid}:history`;
+    pipeline.lpush(histKey, entry);
+    pipeline.ltrim(histKey, 0, HISTORY_MAX - 1);
+  }
+
+  await pipeline.exec();
+  logger.info({ roomCode, players: playerUuids.length, winner: winnerUuid }, '[Game] History written');
+}
 
 export async function handleStartGame(io: TypedServer, roomCode: string): Promise<void> {
   const room = await getRoom(roomCode);
@@ -35,12 +63,12 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
   const players = await getPlayers(roomCode);
   const gamePlayers = players.filter((p) => p.role === 'PLAYER');
 
-  // Generate and persist a unique card per player (M3: O(1) HGET per card)
+  // Generate and persist a unique card per player
   const cards: Record<string, BingoCard> = {};
   for (const p of gamePlayers) cards[p.uuid] = generateBingoCard();
 
   const deck = initializeDeck();
-  await saveCards(roomCode, cards);           // M3: HSET per card
+  await saveCards(roomCode, cards);
   await updateRoom(roomCode, { deck, calledNumbers: [] });
 
   // Deliver each player their private card
@@ -52,8 +80,7 @@ export async function handleStartGame(io: TypedServer, roomCode: string): Promis
   // Broadcast to room so DISPLAY clients know the game started
   io.to(roomCode).emit('game_starting', { pattern: room.pattern, intervalSeconds: room.intervalSeconds });
 
-  // C4: Schedule the first BullMQ tick after 3 s countdown
-  //     Each tick will schedule the next one — self-perpetuating chain
+  // C4: Schedule first BullMQ tick after 3 s countdown
   await scheduleNextTick(roomCode, room.intervalSeconds, 3000 + room.intervalSeconds * 1000);
 }
 
@@ -66,25 +93,31 @@ export async function handleClaimBingo(io: TypedServer, socket: TypedSocket, roo
     return;
   }
 
-  const card = await getCard(roomCode, socket.data.uuid); // M3: O(1) HGET
+  const card = await getCard(roomCode, socket.data.uuid);
   if (!card) return;
 
   const isWin = validateBingo(card, room.calledNumbers, room.pattern);
 
   if (isWin) {
-    // C1: Atomic PLAYING → FINISHED — only the first winner wins
+    // C1: Atomic PLAYING → FINISHED — only first winner wins
     const won = await atomicStateTransition(roomKey(roomCode), 'PLAYING', 'FINISHED');
-    if (!won) return; // Another player won the race — ignore
+    if (!won) return;
 
-    // C4: No stopGameLoop() call needed — the BullMQ worker reads state from
-    //     Redis on its next tick and sees FINISHED, so it won't reschedule.
     io.to(roomCode).emit('game_won', {
       winner: { uuid: socket.data.uuid, nickname: socket.data.nickname },
       pattern: room.pattern,
       calledNumbers: room.calledNumbers,
     });
+
+    // Write history for all players in the room
+    const players = await getPlayers(roomCode);
+    const playerUuids = players.filter(p => p.role === 'PLAYER').map(p => p.uuid);
+    await recordGameHistory(
+      roomCode, room.houseName, room.pattern,
+      room.calledNumbers.length, socket.data.uuid, playerUuids,
+    );
   } else {
-    await setCooldown(roomCode, socket.data.uuid); // M3: O(1) HSET
+    await setCooldown(roomCode, socket.data.uuid);
     io.to(roomCode).emit('false_alarm', {
       uuid: socket.data.uuid,
       nickname: socket.data.nickname,

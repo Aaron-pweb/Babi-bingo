@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-
 // C3: Never fall back to a hardcoded secret — fail loudly at startup
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {
@@ -12,7 +11,6 @@ if (!jwtSecret) {
 }
 
 const SECRET = new TextEncoder().encode(jwtSecret);
-
 
 // ─────────────────────────────────────────────
 //  Token Payload Shapes
@@ -24,24 +22,21 @@ export interface GuestPayload extends JWTPayload {
   role: 'PLAYER';
 }
 
-export interface OperatorPayload extends JWTPayload {
+/** Owners run their house directly — no separate Operator role */
+export interface OwnerPayload extends JWTPayload {
   uuid: string;
-  role: 'OPERATOR' | 'OWNER';
+  role: 'OWNER';
   houseId: string;
   username: string;
   houseName: string;
 }
 
-export type AuthPayload = GuestPayload | OperatorPayload;
+export type AuthPayload = GuestPayload | OwnerPayload;
 
 // ─────────────────────────────────────────────
 //  Token Factories
 // ─────────────────────────────────────────────
 
-/**
- * Creates a signed JWT for a guest player.
- * Expires in 24h — no login required.
- */
 export async function signGuestToken(uuid: string, nickname: string): Promise<string> {
   return new SignJWT({ uuid, nickname, role: 'PLAYER' as UserRole })
     .setProtectedHeader({ alg: 'HS256' })
@@ -50,12 +45,9 @@ export async function signGuestToken(uuid: string, nickname: string): Promise<st
     .sign(SECRET);
 }
 
-/**
- * Creates a short-lived access token for operators/owners.
- */
 export async function signAccessToken(
   uuid: string,
-  role: 'OPERATOR' | 'OWNER',
+  role: 'OWNER',
   houseId: string,
   username: string,
   houseName: string,
@@ -67,9 +59,6 @@ export async function signAccessToken(
     .sign(SECRET);
 }
 
-/**
- * Creates a long-lived refresh token for operators/owners.
- */
 export async function signRefreshToken(uuid: string): Promise<string> {
   return new SignJWT({ uuid, type: 'refresh' })
     .setProtectedHeader({ alg: 'HS256' })
