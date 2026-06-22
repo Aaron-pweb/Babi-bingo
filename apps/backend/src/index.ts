@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import http from 'http';
+import path from 'path';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -94,6 +95,19 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/players', playerRoutes);
 app.use('/api/owner', ownerRoutes);
+
+// Serve frontend static assets in production
+if (process.env.NODE_ENV === 'production') {
+  const frontendDistPath = path.join(__dirname, '../../../../frontend/dist');
+  app.use(express.static(frontendDistPath));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
 
 // H6: Global error handler — MUST be last
 app.use(globalErrorHandler);

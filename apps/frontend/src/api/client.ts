@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:4000`;
+const BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? `http://${window.location.hostname}:4000` : '');
 
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
