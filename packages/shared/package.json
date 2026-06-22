@@ -2,8 +2,8 @@
   "name": "@babi-bingo/shared",
   "version": "1.0.0",
   "private": true,
-  "main": "./dist/index.ts",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.js",
   "scripts": {
     "build": "tsc"
   },
