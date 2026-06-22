@@ -98,7 +98,7 @@ app.use('/api/owner', ownerRoutes);
 
 // Serve frontend static assets in production
 if (process.env.NODE_ENV === 'production') {
-  const frontendDistPath = path.join(__dirname, '../../../../frontend/dist');
+  const frontendDistPath = path.join(process.cwd(), 'apps/frontend/dist');
   app.use(express.static(frontendDistPath));
 
   app.get('*', (req, res, next) => {
