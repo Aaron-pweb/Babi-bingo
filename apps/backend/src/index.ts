@@ -39,14 +39,26 @@ app.use(helmet({
 }));
 // M5: Structured HTTP request logging
 app.use(pinoHttp({ logger }));
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin) || origin.includes('10.') || origin.includes('192.168.') || origin.includes('172.')) {
-      return cb(null, true);
+app.use(cors((req, cb) => {
+  const origin = req.header('Origin');
+  const host = req.header('Host');
+  let allowed = false;
+
+  if (!origin) {
+    allowed = true;
+  } else {
+    if (host && origin.includes(host)) {
+      allowed = true;
+    } else if (allowedOrigins.includes(origin) || origin.includes('10.') || origin.includes('192.168.') || origin.includes('172.')) {
+      allowed = true;
     }
-    cb(new Error(`CORS: origin ${origin} not allowed`));
-  },
-  credentials: true,
+  }
+
+  if (allowed) {
+    cb(null, { origin: true, credentials: true });
+  } else {
+    cb(null, { origin: false });
+  }
 }));
 app.use(express.json({ limit: '10kb' }));
 
