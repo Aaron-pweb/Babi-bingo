@@ -29,6 +29,20 @@ export default function PlayerRoom() {
   useEffect(() => {
     const socket = connectSocket({ token: token ?? '' });
 
+    const updateFromRoom = (r: {state:string; calledNumbers:number[]}) => {
+      setStatus(r.state);
+      setCalled(r.calledNumbers);
+      if (r.calledNumbers && r.calledNumbers.length > 0) {
+        const n = r.calledNumbers[r.calledNumbers.length - 1];
+        setLastNum({ number: n, column: col(n) });
+      }
+    };
+
+    const onRoomJoined = ({ room }: { room:{state:string;calledNumbers:number[]} }) => {
+      updateFromRoom(room);
+      socket.emit('request_sync', { roomCode: code! });
+    };
+
     const onStarting = ({ card: c }: { card?: BingoCardType; pattern: string }) => {
       if (c) setCard(c); setStatus('PLAYING');
     };
@@ -43,10 +57,12 @@ export default function PlayerRoom() {
       else toast(`${winner.nickname} won this round`, 'info');
     };
     const onFalse    = () => { toast('Not quite — keep playing!', 'warning'); setCooldown(false); };
-    const onSync     = ({ room, card: c }: { room:{state:string;calledNumbers:number[]}, card?:BingoCardType }) => {
-      setStatus(room.state); setCalled(room.calledNumbers); if(c) setCard(c);
+    const onSync     = ({ room, card: c }: { room:{state:string;calledNumbers:number[]}, card?:BingoCardType | null }) => {
+      updateFromRoom(room); 
+      if(c) setCard(c);
+      else if (room.state === 'PLAYING') setCard(null); // Explicitly null if late join
     };
-    const onErr      = (err: Error) => { if(err.message.includes('AUTH')){ clearAll(); nav('/auth'); }};
+    const onErr      = (err: Error) => { if(err.message.includes('AUTH')){ clearAll(); nav('/login'); }};
 
     socket.on('game_starting', onStarting);
     socket.on('number_called', onNumber);
@@ -55,14 +71,16 @@ export default function PlayerRoom() {
     socket.on('game_won', onWon);
     socket.on('false_alarm', onFalse);
     socket.on('sync_state', onSync);
+    socket.on('room_joined', onRoomJoined);
     socket.on('connect_error', onErr);
-    socket.emit('request_sync', { roomCode: code! });
+    
+    socket.emit('join_room', { roomCode: code!, token: token! });
 
     return () => {
       socket.off('game_starting',onStarting); socket.off('number_called',onNumber);
       socket.off('game_paused',onPaused); socket.off('game_resumed',onResumed);
       socket.off('game_won',onWon); socket.off('false_alarm',onFalse);
-      socket.off('sync_state',onSync); socket.off('connect_error',onErr);
+      socket.off('sync_state',onSync); socket.off('room_joined',onRoomJoined); socket.off('connect_error',onErr);
     };
   }, [code, token, clearAll, nav, nickname, toast]);
 
@@ -100,18 +118,18 @@ export default function PlayerRoom() {
           </div>
         </div>
 
-        {/* Last number hero */}
         {lastNum ? (
-          <div className="animate-number-in" style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'1.25rem 0' }}>
+          <div className="animate-number-in" style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'1.5rem 0' }}>
             <div style={{
-              width:100, height:100, borderRadius:'50%',
-              border:`3px solid ${COL_COLOR[lastNum.column]}`,
-              background:`${COL_COLOR[lastNum.column]}15`,
+              width:120, height:120, borderRadius:'50%',
+              border:`4px solid ${COL_COLOR[lastNum.column]}`,
+              background:`${COL_COLOR[lastNum.column]}11`,
+              backdropFilter: 'blur(12px)',
               display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-              boxShadow:`0 0 30px ${COL_COLOR[lastNum.column]}44`,
+              boxShadow:`0 0 40px ${COL_COLOR[lastNum.column]}66, inset 0 0 20px ${COL_COLOR[lastNum.column]}33`,
             }}>
-              <p style={{ fontSize:'0.75rem', fontWeight:900, color: COL_COLOR[lastNum.column], letterSpacing:2 }}>{lastNum.column}</p>
-              <p style={{ fontSize:'2.5rem', fontWeight:900, fontFamily:'Outfit,sans-serif', lineHeight:1 }}>{lastNum.number}</p>
+              <p style={{ fontSize:'0.85rem', fontWeight:900, color: COL_COLOR[lastNum.column], letterSpacing:3, textShadow:`0 0 10px ${COL_COLOR[lastNum.column]}` }}>{lastNum.column}</p>
+              <p style={{ fontSize:'3.5rem', fontWeight:900, fontFamily:'Outfit,sans-serif', lineHeight:1, textShadow:`0 0 20px ${COL_COLOR[lastNum.column]}88` }}>{lastNum.number}</p>
             </div>
           </div>
         ) : status === 'WAITING' ? (
@@ -152,11 +170,16 @@ export default function PlayerRoom() {
                 return (
                   <div key={i} style={{
                     aspectRatio:'1', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center',
-                    fontWeight:900, fontFamily:'Outfit,sans-serif', fontSize:'1.1rem',
-                    border: `1.5px solid ${isMarked ? COL_COLOR[colKey] : 'var(--border)'}`,
-                    background: isMarked ? `${COL_COLOR[colKey]}22` : 'var(--surface)',
+                    fontWeight:900, fontFamily:'Outfit,sans-serif', fontSize:'1.2rem',
+                    border: `1px solid ${isMarked ? COL_COLOR[colKey] : 'var(--border)'}`,
+                    background: isMarked ? `${COL_COLOR[colKey]}15` : 'var(--surface)',
                     color: isMarked ? COL_COLOR[colKey] : 'var(--dim)',
-                    transition:'all 200ms', boxShadow: isMarked ? `0 0 8px ${COL_COLOR[colKey]}44` : 'none',
+                    transition:'all 300ms cubic-bezier(0.4, 0, 0.2, 1)', 
+                    boxShadow: isMarked 
+                      ? `0 0 15px ${COL_COLOR[colKey]}44, inset 0 0 10px ${COL_COLOR[colKey]}22` 
+                      : 'inset 0 2px 4px rgba(0,0,0,0.2)',
+                    textShadow: isMarked ? `0 0 8px ${COL_COLOR[colKey]}88` : 'none',
+                    transform: isMarked ? 'translateY(-2px)' : 'translateY(0)',
                   }}>
                     {isFree ? '★' : n}
                   </div>
@@ -164,6 +187,14 @@ export default function PlayerRoom() {
               })}
             </div>
             <p style={{ textAlign:'center', color:'var(--muted)', fontSize:'0.72rem', marginTop:6 }}>{totalMarked}/25 marked</p>
+          </div>
+        ) : status === 'PLAYING' && card === null ? (
+          <div className="card" style={{ textAlign:'center', padding:'2rem 1rem' }}>
+            <p style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>👀</p>
+            <h3 style={{ fontFamily:'Outfit,sans-serif', fontWeight:800, marginBottom:'0.5rem' }}>Spectator Mode</h3>
+            <p style={{ color:'var(--dim)', fontSize:'0.875rem' }}>
+              This game is already in progress. You can observe the calls, but you don't have a card for this round.
+            </p>
           </div>
         ) : status !== 'WAITING' && (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:4 }}>

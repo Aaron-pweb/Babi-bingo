@@ -50,17 +50,19 @@ app.use(cors({
 app.use(express.json({ limit: '10kb' }));
 
 // H2: Rate limiters
+// Strict limit on login/register — brute-force protection
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  skip: (req) => req.method === 'GET', // never limit GET /me
 });
 
 const roomCreateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Room creation limit reached, try again later' },
@@ -103,7 +105,18 @@ const httpServer = http.createServer(app);
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, cb) => {
+      // Allow no-origin (curl, mobile apps), and any private network IP
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        /^https?:\/\/(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(origin)
+      ) {
+        cb(null, true);
+      } else {
+        cb(new Error(`Socket CORS: origin ${origin} not allowed`));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },

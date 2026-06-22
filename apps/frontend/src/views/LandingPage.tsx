@@ -11,7 +11,7 @@ const STATE_CLASS: Record<string, string> = { PLAYING:'badge-playing', WAITING:'
 function RoomCard({ room }: { room: RoomPublicInfo }) {
   const accent = room.accentColor ?? '#f5a623';
   return (
-    <div className="card-hover" style={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
+    <div className="glass card-hover" style={{ cursor: 'default', position: 'relative', overflow: 'hidden' }}>
       {/* Top accent stripe */}
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background: accent, borderRadius:'16px 16px 0 0' }} />
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginTop: 4 }}>
@@ -67,14 +67,15 @@ export default function LandingPage() {
   return (
     <Shell>
       {/* ── Hero ────────────────────────────────────────────────── */}
-      <section style={{ padding:'5rem 1.5rem 4rem', textAlign:'center', maxWidth:700, margin:'0 auto' }}>
-        <div className="animate-fade-up" style={{ fontSize:'5rem', marginBottom:'1rem' }}>🎱</div>
+      <section style={{ padding:'5rem 1.5rem 4rem', textAlign:'center', maxWidth:800, margin:'0 auto', position: 'relative' }}>
+        <div className="animate-fade-up" style={{ fontSize:'6rem', marginBottom:'1rem', filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.5))' }}>🎱</div>
         <h1 className="animate-fade-up-delay-1" style={{
-          fontSize:'clamp(2.5rem,6vw,4rem)', fontWeight:900, lineHeight:1.1,
-          fontFamily:'Outfit,sans-serif', color:'var(--text)', marginBottom:'1rem'
+          fontSize:'clamp(3rem,8vw,5rem)', fontWeight:900, lineHeight:1.05,
+          fontFamily:'Outfit,sans-serif', color:'var(--text)', marginBottom:'1.5rem',
+          textShadow: '0 4px 20px rgba(255,255,255,0.1)'
         }}>
           Live Bingo for<br/>
-          <span style={{ color:'var(--gold)' }}>Every House.</span>
+          <span style={{ color:'var(--gold)', textShadow: '0 0 30px rgba(245,166,35,0.4)' }}>Every House.</span>
         </h1>
         <p className="animate-fade-up-delay-2" style={{ color:'var(--dim)', fontSize:'1.1rem', lineHeight:1.7, marginBottom:'2.5rem' }}>
           Join live games, run your bingo house, or display real-time draws on any TV screen.
@@ -106,10 +107,10 @@ export default function LandingPage() {
             { icon:'🏠', title:'Multi-house', desc:'Operators manage their own rooms independently. Full house branding control.' },
             { icon:'🌍', title:'Any Device', desc:'Players join on their phone, owner manages on tablet, audience watches on TV.' },
           ].map((f) => (
-            <div key={f.title} className="card" style={{ textAlign:'center' }}>
-              <div style={{ fontSize:'2rem', marginBottom:'0.75rem' }}>{f.icon}</div>
-              <h3 style={{ fontWeight:800, fontSize:'1rem', marginBottom:'0.5rem', fontFamily:'Outfit,sans-serif' }}>{f.title}</h3>
-              <p style={{ color:'var(--dim)', fontSize:'0.875rem', lineHeight:1.6 }}>{f.desc}</p>
+            <div key={f.title} className="glass-panel" style={{ textAlign:'center', padding: '2rem 1.5rem', transition: 'transform 0.3s ease, box-shadow 0.3s ease' }}>
+              <div style={{ fontSize:'2.5rem', marginBottom:'1rem', filter: 'drop-shadow(0 4px 10px rgba(255,255,255,0.1))' }}>{f.icon}</div>
+              <h3 style={{ fontWeight:800, fontSize:'1.1rem', marginBottom:'0.5rem', fontFamily:'Outfit,sans-serif', color: 'var(--text)' }}>{f.title}</h3>
+              <p style={{ color:'var(--dim)', fontSize:'0.9rem', lineHeight:1.6 }}>{f.desc}</p>
             </div>
           ))}
         </div>

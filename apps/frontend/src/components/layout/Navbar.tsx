@@ -26,14 +26,13 @@ export default function Navbar() {
   const displayName = nickname ?? houseName ?? 'Account';
 
   return (
-    <nav style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
-      className="sticky top-0 z-50 backdrop-blur-sm">
+    <nav className="glass sticky top-0 z-50 transition-all duration-300" style={{ borderTop: 'none', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
 
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 shrink-0">
-          <span className="text-2xl">🎱</span>
-          <span className="font-black text-xl" style={{ color: 'var(--gold)' }}>Babi<span style={{ color: 'var(--text)' }}>Bingo</span></span>
+        <Link to="/" className="flex items-center gap-2 shrink-0 hover:scale-105 transition-transform duration-300">
+          <span className="text-2xl drop-shadow-[0_0_10px_rgba(245,166,35,0.4)]">🎱</span>
+          <span className="font-black text-xl" style={{ color: 'var(--gold)', textShadow: '0 0 20px rgba(245,166,35,0.4)' }}>Babi<span style={{ color: 'var(--text)', textShadow: 'none' }}>Bingo</span></span>
         </Link>
 
         {/* Nav links */}
@@ -44,11 +43,6 @@ export default function Navbar() {
               {l.label}
             </Link>
           ))}
-          {!isAuthenticated && (
-            <>
-              <Link to="/login" className={`nav-link ${isActive('/login') ? 'active' : ''}`}>Sign In</Link>
-            </>
-          )}
         </div>
 
         {/* Right: theme + account */}
