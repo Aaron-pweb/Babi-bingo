@@ -4,3 +4,7 @@ apps/backend/.env
 apps/backend/.env.example
 apps/frontend/.env
 dump.rdb
+dist/
+**/dist/
+**/dist-ssr/
+

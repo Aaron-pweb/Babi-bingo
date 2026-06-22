@@ -10,7 +10,7 @@ import { logger } from '../logger';
 //  BullMQ manages its own ioredis instances internally —
 //  it must not share the app's existing connection.
 // ─────────────────────────────────────────────
-const rawUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const rawUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const parsedUrl = new URL(rawUrl);
 
 export const bullConnection = {

@@ -4,7 +4,14 @@ import { logger } from '../logger';
 
 dotenv.config();
 
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+
+try {
+  const parsed = new URL(REDIS_URL);
+  logger.info(`[Redis] Initializing connection to: ${parsed.protocol}//${parsed.host}${parsed.pathname}`);
+} catch (e) {
+  logger.error(`[Redis] Failed to parse REDIS_URL: ${REDIS_URL}`);
+}
 
 export const redis = new Redis(REDIS_URL, {
   lazyConnect: true,
